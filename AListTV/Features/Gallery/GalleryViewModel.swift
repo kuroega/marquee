@@ -20,15 +20,11 @@ enum GalleryCollection: Hashable {
     case unindexed
 }
 
-/// One card in the Watching / Recently Watched shelf: a specific file, shown
-/// as its movie or show.
+/// One card in the Watching shelf: a specific file, shown as its movie or show.
 struct GalleryPlayEntry: Identifiable, Hashable {
-    enum Section { case watching, recent }
-
     let title: GalleryTitle
     let path: String
     let date: Date
-    let section: Section
     let status: WatchStatus
 
     var id: String { path }
@@ -110,7 +106,7 @@ final class GalleryViewModel: ObservableObject {
 
     @Published private(set) var tmdb: TMDBClient?
     /// Last title put on stage, so the spotlight follows it as matches land.
-    var spotlightSubject: (title: GalleryTitle, path: String?, section: GalleryPlayEntry.Section?)?
+    var spotlightSubject: (title: GalleryTitle, path: String?, watching: Bool)?
     let spotlight = GallerySpotlight()
     var hasMetadata: Bool { tmdb != nil }
     var isScanning: Bool { if case .scanning = phase { return true }; return false }
@@ -788,7 +784,7 @@ final class GalleryViewModel: ObservableObject {
     }
 
     /// Drops every resume point of a title so it leaves Watching; its history
-    /// and watched marks stay, so it falls back to Recently Watched.
+    /// and watched marks stay.
     func removeFromWatching(_ title: GalleryTitle) {
         for path in paths(for: title) where watch.progress[path] != nil {
             progressStore.remove(identity: PlaybackProgressIdentity(baseURL: account.baseURL, username: account.username, virtualPath: path))
@@ -935,7 +931,6 @@ final class GalleryViewModel: ObservableObject {
         // Watching: one card per title with a resume point, on its newest one,
         // titles ordered by when any of their files was last played, so the one
         // just watched leads even if another of its episodes holds the card.
-        var seenTitles = Set<GalleryTitle>()
         var resumePaths: [GalleryTitle: (path: String, saved: Date)] = [:]
         var lastPlayed: [GalleryTitle: Date] = [:]
         for path in Set(watch.progress.keys).union(watch.watched.keys).union(watch.opened.keys) {
@@ -947,21 +942,8 @@ final class GalleryViewModel: ObservableObject {
         let inProgress = resumePaths
             .map { title, resume in (resume.path, title, lastPlayed[title] ?? resume.saved) }
             .sorted { $0.2 != $1.2 ? $0.2 > $1.2 : $0.0 < $1.0 }
-        for (path, title, date) in inProgress where seenTitles.insert(title).inserted {
-            shelves.playEntries.append(GalleryPlayEntry(title: title, path: path, date: date, section: .watching, status: watch.status(path)))
-        }
-
-        // Recently Watched: finished or opened files, excluding titles already above.
-        let recent = Set(watch.watched.keys).union(watch.opened.keys)
-            .compactMap { path -> (String, GalleryTitle, Date)? in
-                guard let title = catalog.title(forPath: path), catalog.isIndexed(title), let date = watch.lastActivity(path) else { return nil }
-                return (path, title, date)
-            }
-            .sorted { $0.2 > $1.2 }
-        var recentCount = 0
-        for (path, title, date) in recent where recentCount < 20 && seenTitles.insert(title).inserted {
-            shelves.playEntries.append(GalleryPlayEntry(title: title, path: path, date: date, section: .recent, status: watch.status(path)))
-            recentCount += 1
+        shelves.playEntries = inProgress.map { path, title, date in
+            GalleryPlayEntry(title: title, path: path, date: date, status: watch.status(path))
         }
 
         // Genres: by number of movies, artwork from the newest ones.

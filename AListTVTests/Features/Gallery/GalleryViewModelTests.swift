@@ -212,7 +212,7 @@ final class GalleryViewModelTests: XCTestCase {
         viewModel.onAppear()
         await waitUntil { viewModel.phase == .ready && viewModel.catalog.videoCount == 4 }
         let dark = try XCTUnwrap(viewModel.shelves.playEntries.first { $0.path.hasPrefix("/TV/Dark") }?.title)
-        XCTAssertEqual(viewModel.shelves.playEntries.filter { $0.section == .watching }.count, 2)
+        XCTAssertEqual(viewModel.shelves.playEntries.count, 2)
 
         viewModel.removeFromWatching(dark)
 
@@ -220,9 +220,8 @@ final class GalleryViewModelTests: XCTestCase {
         // under Watching through the other one; the movie keeps its own.
         XCTAssertTrue(episodes.allSatisfy { progress.record(for: identity($0)) == nil })
         XCTAssertNotNil(progress.record(for: identity(movie)))
-        XCTAssertEqual(viewModel.shelves.playEntries.filter { $0.section == .watching }.map(\.path), [movie])
-        // The opened episode stays in history, under Recently Watched.
-        XCTAssertEqual(viewModel.shelves.playEntries.filter { $0.section == .recent }.map(\.path), [episodes[1]])
+        // The opened episode stays in history but no longer earns a card.
+        XCTAssertEqual(viewModel.shelves.playEntries.map(\.path), [movie])
     }
 
     func testWatchingLeadsWithTheTitleLastPlayed() async throws {
@@ -246,13 +245,19 @@ final class GalleryViewModelTests: XCTestCase {
         let viewModel = makeViewModel(server: server, store: store, progress: progress)
         viewModel.onAppear()
         await waitUntil { viewModel.phase == .ready && viewModel.catalog.videoCount == 4 }
-        XCTAssertEqual(viewModel.shelves.playEntries.filter { $0.section == .watching }.map(\.path), [movie, episodes[0]])
+        XCTAssertEqual(viewModel.shelves.playEntries.map(\.path), [movie, episodes[0]])
 
         // Finishing the next episode leaves the show's card on the one in
         // progress, but the show was played last, so it moves to the front.
         clock += 60
         progress.update(identity: identity(episodes[1]), position: 2_950, duration: 3_000)
         viewModel.reloadWatchState()
-        XCTAssertEqual(viewModel.shelves.playEntries.filter { $0.section == .watching }.map(\.path), [episodes[0], movie])
+        XCTAssertEqual(viewModel.shelves.playEntries.map(\.path), [episodes[0], movie])
+
+        // Resuming the movie later puts it back in front.
+        clock += 60
+        progress.update(identity: identity(movie), position: 900, duration: 3_000)
+        viewModel.reloadWatchState()
+        XCTAssertEqual(viewModel.shelves.playEntries.map(\.path), [movie, episodes[0]])
     }
 }

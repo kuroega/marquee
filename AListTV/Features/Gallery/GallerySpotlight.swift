@@ -122,13 +122,13 @@ extension GalleryViewModel {
 
     // MARK: Spotlight
 
-    func focus(_ title: GalleryTitle, path: String? = nil, section: GalleryPlayEntry.Section? = nil) {
-        spotlightSubject = (title, path, section)
+    func focus(_ title: GalleryTitle, path: String? = nil, watching: Bool = false) {
+        spotlightSubject = (title, path, watching)
         switch title {
         case let .movie(id):
             guard let movie = catalog.movie(id) else { return }
             var content = movieContent(movie)
-            if let section { content.eyebrow = section == .watching ? "CONTINUE WATCHING" : "RECENTLY WATCHED" }
+            if watching { content.eyebrow = "CONTINUE WATCHING" }
             if let path, case let .inProgress(fraction, remaining) = status(path) {
                 content.detail = GalleryFormat.remaining(remaining)
                 content.progress = fraction
@@ -142,7 +142,7 @@ extension GalleryViewModel {
             guard let show = catalog.show(id) else { return }
             var content = showContent(show)
             let episode = path.flatMap { path in show.episodes.first { $0.path == path } }
-            if let section { content.eyebrow = section == .watching ? "CONTINUE WATCHING" : "RECENTLY WATCHED" }
+            if watching { content.eyebrow = "CONTINUE WATCHING" }
             if let episode {
                 var parts = [episode.code]
                 if let name = episode.file.parsed.episodeTitle { parts.append(name) }
@@ -179,9 +179,9 @@ extension GalleryViewModel {
         if catalog.movie(id(of: subject.title)) == nil && catalog.show(id(of: subject.title)) == nil {
             // The local entry was replaced by its matched one; follow the file.
             guard let path, let title = catalog.title(forPath: path) else { return }
-            focus(title, path: subject.path, section: subject.section)
+            focus(title, path: subject.path, watching: subject.watching)
         } else {
-            focus(subject.title, path: subject.path, section: subject.section)
+            focus(subject.title, path: subject.path, watching: subject.watching)
         }
     }
 
@@ -195,7 +195,7 @@ extension GalleryViewModel {
     func focusDefault() {
         guard spotlight.content == nil else { return }
         if let entry = shelves.playEntries.first {
-            focus(entry.title, path: entry.path, section: entry.section)
+            focus(entry.title, path: entry.path, watching: true)
         } else if let first = shelves.unwatched.first ?? shelves.movies.first.map({ .movie($0.id) }) ?? shelves.shows.first.map({ .show($0.id) })
                     ?? shelves.unindexed.first {
             focus(first)

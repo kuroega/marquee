@@ -265,7 +265,7 @@ struct GalleryWatchState: Sendable, Equatable {
 
     func isWatched(_ path: String) -> Bool { watched[path] != nil }
 
-    /// Most recent interaction of any kind, for "Recently Watched" ordering.
+    /// Most recent interaction of any kind, for "Watching" ordering.
     func lastActivity(_ path: String) -> Date? {
         [progress[path]?.updatedAt, watched[path], opened[path]].compactMap { $0 }.max()
     }

@@ -152,7 +152,6 @@ struct GalleryView: View {
         let entries = viewModel.shelves.playEntries
         return GalleryShelf(title: nil, count: nil) {
             ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-                let sectionStart = index == 0 || entries[index - 1].section != entry.section
                 Button {
                     viewModel.path.append(.title(entry.title, focusPath: entry.path))
                 } label: {
@@ -160,14 +159,14 @@ struct GalleryView: View {
                         entry: entry,
                         info: viewModel.card(for: entry.title),
                         episode: viewModel.catalog.episode(forPath: entry.path)?.episode,
-                        sectionLabel: sectionStart ? (entry.section == .watching ? "Watching" : "Recently Watched") : nil
+                        sectionLabel: index == 0 ? "Watching" : nil
                     ) {
-                        viewModel.focus(entry.title, path: entry.path, section: entry.section)
+                        viewModel.focus(entry.title, path: entry.path, watching: true)
                         focusedShelf = "play"
                     }
                 }
                 .buttonStyle(.borderless)
-                .contextMenu { menu(for: entry.title, playing: entry.path, section: entry.section) }
+                .contextMenu { menu(for: entry.title, playing: entry.path, watching: true) }
                 .accessibilityIdentifier("gallery.play.\(entry.path)")
             }
         }
@@ -209,8 +208,8 @@ struct GalleryView: View {
         }
     }
 
-    private func menu(for title: GalleryTitle, playing path: String?, section: GalleryPlayEntry.Section? = nil) -> some View {
-        GalleryTitleMenu(viewModel: viewModel, title: title, path: path, section: section, onReveal: onReveal)
+    private func menu(for title: GalleryTitle, playing path: String?, watching: Bool = false) -> some View {
+        GalleryTitleMenu(viewModel: viewModel, title: title, path: path, watching: watching, onReveal: onReveal)
     }
 
     // MARK: States
@@ -529,7 +528,7 @@ private struct UnwatchedFold: Shape {
     }
 }
 
-/// Wide card for Watching / Recently Watched, labelled with its section.
+/// Wide card for the Watching shelf; the first one carries the shelf's label.
 struct PlayCardLabel: View {
     let entry: GalleryPlayEntry
     let info: GalleryCardInfo?
@@ -735,7 +734,8 @@ struct GalleryTitleMenu: View {
     let title: GalleryTitle
     /// The file the card stands for (a Watching card's episode), if any.
     var path: String?
-    var section: GalleryPlayEntry.Section?
+    /// Whether the card sits on the Watching shelf.
+    var watching = false
     let onReveal: (AListObject) -> Void
 
     var body: some View {
@@ -750,7 +750,7 @@ struct GalleryTitleMenu: View {
         } else {
             Button { viewModel.setWatched(true, paths: paths) } label: { Label("Mark as Watched", systemImage: "checkmark.circle") }
         }
-        if section == .watching {
+        if watching {
             Button(role: .destructive) { viewModel.removeFromWatching(title) } label: { Label("Remove from Watching", systemImage: "minus.circle") }
         }
         if let file {
