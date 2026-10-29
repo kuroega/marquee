@@ -60,11 +60,18 @@ final class VLCPlayerControllerAdapter: NSObject, ObservableObject, PlayerContro
     }
 
     private static func makeMediaPlayer() -> VLCMediaPlayer {
+        var options = ["--freetype-font=Noto Sans CJK SC"]
         let fontURL = Bundle.main.url(forResource: "NotoSansCJKsc-Regular", withExtension: "otf")
         if let fontURL {
             CTFontManagerRegisterFontsForURL(fontURL as CFURL, .process, nil)
+            // `--freetype-font` only reaches plain-text subtitles; ASS/SSA go
+            // through libass, which needs the CJK font in its own directory.
+            if let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first,
+               let fontsDirectory = SubtitleFontDirectory.prepare(bundledFont: fontURL, cachesDirectory: cachesDirectory) {
+                options.append("--ssa-fontsdir=\(fontsDirectory.path)")
+            }
         }
-        return VLCMediaPlayer(options: ["--freetype-font=Noto Sans CJK SC"])
+        return VLCMediaPlayer(options: options)
     }
 
     func replaceCurrentItem(url: URL, preservingSelections: Bool) {
