@@ -52,3 +52,7 @@ git submodule update --remote alist
 - [AList](https://github.com/AlistGo/alist), the file server this app is a client for
 - [VLCKit](https://code.videolan.org/videolan/VLCKit), the media playback engine (LGPL-2.1)
 - [TMDB](https://www.themoviedb.org), which supplies the metadata and artwork. This product uses the TMDB API but is not endorsed or certified by TMDB.
+
+## License
+
+Marquee is released under the [MIT License](LICENSE). The `alist` submodule is a separate work under its own [AGPL-3.0 license](https://github.com/AlistGo/alist/blob/main/LICENSE).
