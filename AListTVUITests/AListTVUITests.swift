@@ -56,6 +56,7 @@ final class AListTVUITests: XCTestCase {
 
     func testRecentsStartsEmptyAndLeadsToBrowse() {
         login(username: "alice", openBrowse: false)
+        showFiles()
 
         XCTAssertTrue(app.buttons["recents.browse"].waitForExistence(timeout: 3))
         attachScreenshot(named: "recents-empty")
@@ -69,7 +70,7 @@ final class AListTVUITests: XCTestCase {
         openAndDismissPlayer(app.buttons["browser.item./Sample.mp4"], direction: .right)
         openAndDismissPlayer(app.buttons["browser.item./Next.mp3"], direction: .left)
 
-        focusAndSelect(app.buttons["home.mode.recents"], direction: .up)
+        focusAndSelect(app.buttons["files.mode.recents"], direction: .up)
         let newest = app.buttons["recents.item./Next.mp3"]
         let older = app.buttons["recents.item./Sample.mp4"]
         XCTAssertTrue(newest.waitForExistence(timeout: 3))
@@ -96,7 +97,6 @@ final class AListTVUITests: XCTestCase {
 
     func testGalleryListsUnmatchedVideosUnderUnindexed() {
         login(username: "alice", openBrowse: false)
-        focusAndSelect(app.buttons["home.mode.gallery"], direction: .right)
 
         // UI tests run without a TMDB key, so nothing has an exact match.
         XCTAssertTrue(app.staticTexts["Un-indexed"].waitForExistence(timeout: 5))
@@ -172,20 +172,23 @@ final class AListTVUITests: XCTestCase {
         focusAndSelect(app.buttons["browser.item./Shows"], direction: .right)
         XCTAssertTrue(app.buttons["browser.item./Shows/Episode.mp4"].waitForExistence(timeout: 3))
 
-        focusAndSelect(app.buttons["home.mode.recents"], direction: .up)
+        focusAndSelect(app.buttons["files.mode.recents"], direction: .up)
         XCTAssertTrue(app.buttons["recents.browse"].waitForExistence(timeout: 3))
-        focusAndSelect(app.buttons["home.mode.browse"], direction: .right)
+        focusAndSelect(app.buttons["files.mode.browse"], direction: .right)
 
         XCTAssertTrue(app.buttons["browser.item./Shows/Episode.mp4"].waitForExistence(timeout: 3))
         attachScreenshot(named: "browse-nested")
 
-        // Menu climbs out of the folder first, then hands focus to the top bar.
+        // Menu climbs out of the folder first, then hands focus to the Files
+        // switcher, then to the top bar.
         remote.press(.menu)
         let shows = app.buttons["browser.item./Shows"]
         XCTAssertTrue(shows.waitForExistence(timeout: 3))
         focus(shows, direction: .down)
         remote.press(.menu)
-        waitForFocus(app.buttons["home.mode.browse"])
+        waitForFocus(app.buttons["files.mode.browse"])
+        remote.press(.menu)
+        waitForFocus(app.buttons["home.mode.files"])
     }
 
     func testOTPChallengeThenLogin() {
@@ -199,8 +202,7 @@ final class AListTVUITests: XCTestCase {
         if !verify.hasFocus { remote.press(.right) }
         XCTAssertTrue(verify.hasFocus)
         remote.press(.select)
-        assertLandsOnRecents()
-        XCTAssertTrue(app.buttons["recents.browse"].waitForExistence(timeout: 3))
+        assertLandsOnGallery()
     }
 
     func testLogoutReturnsToConnection() {
@@ -632,24 +634,34 @@ final class AListTVUITests: XCTestCase {
         remote.press(.down)
     }
 
-    /// Signs in, checks the app lands on Recents, then opens Browse unless
-    /// the test wants to stay on the landing screen.
+    /// Signs in, checks the app lands on Gallery, then opens Files › Browse
+    /// unless the test wants to stay on the landing screen.
     private func login(username: String, openBrowse: Bool = true) {
         loginForm(username: username)
         focusAndSelect(app.buttons["connection.connect"], direction: .down)
-        assertLandsOnRecents()
+        assertLandsOnGallery()
         if openBrowse { showBrowse() }
     }
 
-    private func assertLandsOnRecents() {
-        let recentsTab = app.buttons["home.mode.recents"]
+    private func assertLandsOnGallery() {
+        let galleryTab = app.buttons["home.mode.gallery"]
+        XCTAssertTrue(galleryTab.waitForExistence(timeout: 3))
+        XCTAssertTrue(galleryTab.isSelected, "Gallery should be the default view")
+        XCTAssertFalse(app.buttons["home.mode.files"].isSelected)
+    }
+
+    /// Opens Files, which starts on Recents.
+    private func showFiles() {
+        focusSpatially(app.buttons["home.mode.files"])
+        remote.press(.select)
+        let recentsTab = app.buttons["files.mode.recents"]
         XCTAssertTrue(recentsTab.waitForExistence(timeout: 3))
-        XCTAssertTrue(recentsTab.isSelected, "Recents should be the default view")
-        XCTAssertFalse(app.buttons["home.mode.browse"].isSelected)
+        XCTAssertTrue(recentsTab.isSelected, "Files should start on Recents")
     }
 
     private func showBrowse() {
-        let browseTab = app.buttons["home.mode.browse"]
+        showFiles()
+        let browseTab = app.buttons["files.mode.browse"]
         focusSpatially(browseTab)
         remote.press(.select)
         XCTAssertTrue(app.buttons["browser.item./Shows"].waitForExistence(timeout: 3))
