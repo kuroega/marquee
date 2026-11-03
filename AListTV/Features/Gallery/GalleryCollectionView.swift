@@ -136,7 +136,7 @@ struct GallerySettingsView: View {
                     title: viewModel.hasMetadata ? "The Movie Database" : "No TMDB API key",
                     detail: viewModel.hasMetadata
                         ? "Posters, artwork and details in \(viewModel.tmdb?.language ?? "en-US")."
-                        : "Copy tvos/Config/TMDB.local.plist.example to AListTV/Resources/TMDB.local.plist."
+                        : "Copy Config/TMDB.local.plist.example to AListTV/Resources/TMDB.local.plist."
                 )
             }
 

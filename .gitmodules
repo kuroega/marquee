@@ -1,0 +1,4 @@
+[submodule "alist"]
+	path = alist
+	url = https://github.com/kuroega/alist.git
+	branch = tvos-server

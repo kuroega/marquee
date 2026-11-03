@@ -1,0 +1,15 @@
+# Xcode
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+.swiftpm/
+
+# macOS
+.DS_Store
+
+# Local TMDB credential bundled into the app (see Config/TMDB.local.plist.example)
+/AListTV/Resources/TMDB.local.plist
+
+# Local device install scripts
+/scripts/install-*.fish

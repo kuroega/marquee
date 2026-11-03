@@ -1,10 +1,10 @@
 # tvOS 本地后端与 App 验证手册
 
-本手册在仓库根目录执行命令。它创建独立的本地数据目录，不修改已有 AList 数据库或凭据。
+本手册在仓库根目录执行命令（先运行 `git submodule update --init`）；AList 后端命令在 `alist/` 子模块中执行。它创建独立的本地数据目录，不修改已有 AList 数据库或凭据。
 
 ## 目标与前提
 
-- Go 版本必须不低于 [`go.mod`](../go.mod) 中声明的版本（当前为 Go 1.25）。
+- Go 版本必须不低于 [`go.mod`](alist/go.mod) 中声明的版本（当前为 Go 1.25）。
 - Xcode 必须安装 tvOS 17.0 或更高版本的平台支持；项目的最低部署目标为 tvOS 17.0。
 - 在 Mac 的 Xcode `Settings → Accounts` 登录可用于开发签名的 Apple ID，并在项目 `AListTV` target 的 `Signing & Capabilities` 中选择对应的 `Team`。Apple TV 不需要登录同一 Apple ID。
 - Debug App 允许连接 `localhost`、`.local`、回环、链路本地和 RFC 1918 私网地址上的 HTTP，供隔离局域网实机验证；Release App 仍只接受 HTTPS。不要把 Debug HTTP 放到公网。
@@ -27,7 +27,7 @@ tar -xzf "$RUN_ROOT/dist.tar.gz" -C "$RUN_ROOT"
 rm "$RUN_ROOT/dist.tar.gz"
 test -f "$RUN_ROOT/dist/index.html"
 
-go build -o "$RUN_ROOT/alist" .
+(cd alist && go build -o "$RUN_ROOT/alist" .)
 
 # `admin` 会生成 $RUN_ROOT/data/config.json 和 SQLite 数据库，但不会加载 Web 静态资源。
 "$RUN_ROOT/alist" --data "$RUN_ROOT/data" --log-std admin
@@ -39,7 +39,7 @@ go build -o "$RUN_ROOT/alist" .
 请将其复制为被 git 忽略的 `.env` 文件，并在其中填入你想使用的密码：
 
 ```sh
-cp .env.example .env
+cp alist/.env.example alist/.env
 # 编辑 .env 文件，修改 ALIST_ADMIN_PASSWORD 的值
 ```
 
@@ -106,9 +106,9 @@ xcrun simctl keychain booted add-root-cert "$(mkcert -CAROOT)/rootCA.pem"
 将示例中的 `10.0.0.2` 替换为 Mac 当前私网 IP，并将 `/Users/you/alist-tvos-local` 替换为实际的 `$RUN_ROOT`。每次启动服务时，通过加载 `.env` 强制设置管理员密码，确保调试体验一致：
 
 ```sh
-ALIST_ADMIN_PASSWORD=$(grep -m 1 '^ALIST_ADMIN_PASSWORD=' .env | sed 's/^ALIST_ADMIN_PASSWORD=//')
+ALIST_ADMIN_PASSWORD=$(grep -m 1 '^ALIST_ADMIN_PASSWORD=' alist/.env | sed 's/^ALIST_ADMIN_PASSWORD=//')
 if [ -z "$ALIST_ADMIN_PASSWORD" ] || [ "$ALIST_ADMIN_PASSWORD" = "your_fixed_password_here" ]; then
-  echo "错误: 请先在 .env 中设置 ALIST_ADMIN_PASSWORD"
+  echo "错误: 请先在 alist/.env 中设置 ALIST_ADMIN_PASSWORD"
   return 1 2>/dev/null || exit 1
 fi
 "$RUN_ROOT/alist" --data "$RUN_ROOT/data" admin set "$ALIST_ADMIN_PASSWORD"
@@ -141,7 +141,7 @@ Apple TV 4K 仅通过局域网与 Xcode 配对；Apple TV HD（第 4 代）也�
 
 ### 3.2 Xcode 构建、安装与连接
 
-1. 打开 `tvos/AListTV.xcodeproj`。
+1. 打开 `AListTV.xcodeproj`。
 2. 确认 `AListTV` target 的 `Signing & Capabilities` 使用第 1 节所述 `Team`。若 Bundle Identifier 已被该 Team 以外的团队占用，改为该 Team 下唯一的 identifier。
 3. 顶部选择 `AListTV` scheme 和已配对的 Apple TV，点击 Run（`⌘R`）。Xcode 会构建、签名、安装并启动 Debug App。
 4. 在连接页输入：
@@ -158,7 +158,7 @@ Apple TV 4K 仅通过局域网与 Xcode 配对；Apple TV HD（第 4 代）也�
 
 ```sh
 xcodebuild \
-  -project tvos/AListTV.xcodeproj \
+  -project AListTV.xcodeproj \
   -scheme AListTV \
   -destination 'platform=tvOS Simulator,id=<SIMULATOR_UDID>' \
   test
