@@ -191,6 +191,19 @@ final class AListTVUITests: XCTestCase {
         waitForFocus(app.buttons["home.mode.files"])
     }
 
+    func testMenuFromFilesTabsReturnsToTopBar() {
+        login(username: "alice", openBrowse: false)
+        showFiles()
+        let recentsTab = app.buttons["files.mode.recents"]
+        // Down from the top bar lands on the selected tab, not the nearest one.
+        remote.press(.down)
+        waitForFocus(recentsTab)
+
+        // Menu on the tabs hands focus back to Files in the top bar.
+        remote.press(.menu)
+        waitForFocus(app.buttons["home.mode.files"])
+    }
+
     func testOTPChallengeThenLogin() {
         loginForm(username: "otp")
         focusAndSelect(app.buttons["connection.connect"], direction: .down)

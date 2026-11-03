@@ -152,11 +152,7 @@ struct HomeView: View {
     private var files: some View {
         VStack(spacing: 0) {
             FilesTabs(selection: filesMode, focusedMode: $focusedFilesMode, onSelect: select)
-                .padding(.horizontal, Theme.screenPadding)
                 .padding(.top, 28)
-                // Spans the width, so Down from anywhere in the top bar lands here.
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .focusSection()
 
             ZStack {
                 switch filesMode {
@@ -370,6 +366,11 @@ private struct FilesTabs: View {
                 .accessibilityAddTraits(selection == mode ? .isSelected : [])
             }
         }
+        .padding(.horizontal, Theme.screenPadding)
+        // Spans the width, so Down from anywhere in the top bar lands here,
+        // on the selected tab rather than the nearest one.
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .focusSection()
         .defaultFocus(focusedMode, selection, priority: .userInitiated)
     }
 }
