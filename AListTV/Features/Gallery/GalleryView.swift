@@ -10,6 +10,8 @@ struct GalleryView: View {
     @State private var isSettingsPresented = false
     /// Shelf holding focus; it snaps under the spotlight like Apple TV rows.
     @State private var focusedShelf: String?
+    /// First card of the first shelf, where Menu brings focus back to.
+    @FocusState private var isFirstCardFocused: Bool
 
     var body: some View {
         content
@@ -101,7 +103,30 @@ struct GalleryView: View {
                     guard let shelf else { return }
                     withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) { proxy.scrollTo(shelf, anchor: .top) }
                 }
+                // Menu from a lower shelf jumps back to the top one; from the
+                // top shelf it falls through to the home screen's handling.
+                .onExitCommand(perform: focusedShelf == firstShelf ? nil : { jumpToTop(proxy) })
         }
+    }
+
+    private func jumpToTop(_ proxy: ScrollViewProxy) {
+        guard let firstShelf else { return }
+        // The lazy stack drops far-off shelves, so bring the top one back
+        // before focusing its first card.
+        proxy.scrollTo(firstShelf, anchor: .top)
+        Task { @MainActor in isFirstCardFocused = true }
+    }
+
+    /// Id of the topmost shelf, matching the ids the shelves scroll by.
+    private var firstShelf: String? {
+        let shelves = viewModel.shelves
+        if !shelves.playEntries.isEmpty { return "play" }
+        if !shelves.genres.isEmpty { return "genres" }
+        if !shelves.unwatched.isEmpty { return "Unwatched" }
+        if !shelves.shows.isEmpty { return "TV Shows" }
+        if !shelves.movies.isEmpty { return "Movies" }
+        if !shelves.unindexed.isEmpty { return "Un-indexed" }
+        return nil
     }
 
     private var shelfList: some View {
@@ -113,6 +138,7 @@ struct GalleryView: View {
                 if !viewModel.shelves.genres.isEmpty {
                     GalleryShelf(title: "Movie Genres", count: viewModel.shelves.genres.count) {
                         ForEach(viewModel.shelves.genres) { tile in
+                            let isFirst = firstShelf == "genres" && tile.id == viewModel.shelves.genres.first?.id
                             Button {
                                 viewModel.path.append(.collection(.genre(tile.id)))
                             } label: {
@@ -122,6 +148,7 @@ struct GalleryView: View {
                                 }
                             }
                             .buttonStyle(.borderless)
+                            .focused($isFirstCardFocused, isFirst)
                             .accessibilityIdentifier("gallery.genre.\(tile.id)")
                         }
                     }
@@ -166,6 +193,7 @@ struct GalleryView: View {
                     }
                 }
                 .buttonStyle(.borderless)
+                .focused($isFirstCardFocused, index == 0 && firstShelf == "play")
                 .contextMenu { menu(for: entry.title, playing: entry.path, watching: true) }
                 .accessibilityIdentifier("gallery.play.\(entry.path)")
             }
@@ -176,7 +204,7 @@ struct GalleryView: View {
         let limit = 24
         return GalleryShelf(title: title, count: titles.count) {
             ForEach(titles.prefix(limit), id: \.self) { item in
-                posterButton(item, shelf: title)
+                posterButton(item, shelf: title, isFirst: firstShelf == title && item == titles.first)
             }
             if titles.count > limit {
                 Button {
@@ -192,7 +220,7 @@ struct GalleryView: View {
     }
 
     @ViewBuilder
-    private func posterButton(_ title: GalleryTitle, shelf: String) -> some View {
+    private func posterButton(_ title: GalleryTitle, shelf: String, isFirst: Bool) -> some View {
         if let info = viewModel.card(for: title) {
             Button {
                 viewModel.path.append(.title(title))
@@ -203,6 +231,7 @@ struct GalleryView: View {
                 }
             }
             .buttonStyle(.borderless)
+            .focused($isFirstCardFocused, isFirst)
             .contextMenu { menu(for: title, playing: nil) }
             .accessibilityIdentifier("gallery.title.\(info.title)")
         }
@@ -773,5 +802,13 @@ struct GalleryTitleMenu: View {
                 Label("Exclude Folder “\(folder.split(separator: "/").last ?? "")”", systemImage: "folder.badge.minus")
             }
         }
+    }
+}
+
+private extension View {
+    /// Binds `binding` to this view only when `enabled`, so one card carries it.
+    @ViewBuilder
+    func focused(_ binding: FocusState<Bool>.Binding, _ enabled: Bool) -> some View {
+        if enabled { focused(binding) } else { self }
     }
 }
