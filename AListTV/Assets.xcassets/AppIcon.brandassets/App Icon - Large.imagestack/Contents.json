@@ -1,0 +1,20 @@
+{
+  "info" : {
+    "author" : "com.alist.tv",
+    "version" : 1
+  },
+  "layers" : [
+    {
+      "filename" : "Front.imagestacklayer"
+    },
+    {
+      "filename" : "Background.imagestacklayer"
+    }
+  ],
+  "properties" : {
+    "canvasSize" : {
+      "height" : 768,
+      "width" : 1280
+    }
+  }
+}
