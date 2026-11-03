@@ -47,6 +47,10 @@ Update the submodule to the latest server branch with:
 git submodule update --remote alist
 ```
 
+## Contributing
+
+Bug reports and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers the branch, commit and review workflow, plus how server changes and submodule bumps are handled.
+
 ## Acknowledgements
 
 - [AList](https://github.com/AlistGo/alist), the file server this app is a client for
