@@ -827,12 +827,21 @@ final class GalleryViewModel: ObservableObject {
     }
 
     /// Drops every resume point of a title so it leaves Watching; its history
-    /// and watched marks stay.
+    /// and watched marks stay. A show also stops offering its next episode
+    /// until one of its episodes is played again.
     func removeFromWatching(_ title: GalleryTitle) {
         for path in paths(for: title) where watch.progress[path] != nil {
             progressStore.remove(identity: PlaybackProgressIdentity(baseURL: account.baseURL, username: account.username, virtualPath: path))
         }
+        if case let .show(id) = title {
+            var dismissals = store.watchingDismissals
+            dismissals[id] = Date()
+            store.setWatchingDismissals(dismissals)
+        }
+        let before = watch
         reloadWatchState()
+        // An up-next card has no resume point, so nothing above rebuilt.
+        if watch == before { rebuildShelves() }
     }
 
     // MARK: Playback
@@ -864,10 +873,7 @@ final class GalleryViewModel: ObservableObject {
             .max(by: { (watch.progress[$0.path]?.updatedAt ?? .distantPast) < (watch.progress[$1.path]?.updatedAt ?? .distantPast) }) {
             return resuming
         }
-        if let lastWatched = episodes.lastIndex(where: { watch.isWatched($0.path) }) {
-            return episodes[(lastWatched + 1)...].first { !watch.isWatched($0.path) } ?? episodes.first
-        }
-        return episodes.first
+        return watch.upNext(in: show) ?? episodes.first
     }
 
     // MARK: Details
@@ -988,6 +994,8 @@ final class GalleryViewModel: ObservableObject {
         // Watching: one card per title with a resume point, on its newest one,
         // titles ordered by when any of their files was last played, so the one
         // just watched leads even if another of its episodes holds the card.
+        // A show with nothing in progress keeps a card on its next episode
+        // until every episode is watched.
         var resumePaths: [GalleryTitle: (path: String, saved: Date)] = [:]
         var lastPlayed: [GalleryTitle: Date] = [:]
         for path in Set(watch.progress.keys).union(watch.watched.keys).union(watch.opened.keys) {
@@ -995,6 +1003,13 @@ final class GalleryViewModel: ObservableObject {
             if let date = watch.lastActivity(path) { lastPlayed[title] = max(lastPlayed[title] ?? date, date) }
             guard case .inProgress = watch.status(path), let saved = watch.progress[path]?.updatedAt else { continue }
             if resumePaths[title].map({ saved > $0.saved }) ?? true { resumePaths[title] = (path, saved) }
+        }
+        let dismissals = store.watchingDismissals
+        for (title, played) in lastPlayed where resumePaths[title] == nil {
+            guard case let .show(id) = title, let show = catalog.show(id),
+                  dismissals[id].map({ played > $0 }) ?? true,
+                  let next = watch.upNext(in: show) else { continue }
+            resumePaths[title] = (next.path, played)
         }
         let inProgress = resumePaths
             .map { title, resume in (resume.path, title, lastPlayed[title] ?? resume.saved) }
@@ -1043,17 +1058,22 @@ final class GalleryViewModel: ObservableObject {
     private func publishTopShelf() {
         guard let topShelf, isLoaded else { return }
         let items = shelves.playEntries.prefix(10).compactMap { entry -> TopShelfWatchingItem? in
-            guard let file = files[entry.path], let info = card(for: entry.title),
-                  case let .inProgress(fraction, remaining) = entry.status else { return nil }
+            guard let file = files[entry.path], let info = card(for: entry.title) else { return nil }
             let episode = catalog.episode(forPath: entry.path)?.episode.code
+            let progress: (fraction: Double, detail: String)
+            switch entry.status {
+            case let .inProgress(fraction, remaining): progress = (fraction, GalleryFormat.remaining(remaining))
+            case .unwatched where episode != nil: progress = (0, "Up Next")
+            default: return nil
+            }
             return TopShelfWatchingItem(
                 path: entry.path,
                 name: file.name,
                 size: file.size,
                 title: info.title,
-                subtitle: [episode, GalleryFormat.remaining(remaining)].compactMap { $0 }.joined(separator: " · "),
+                subtitle: [episode, progress.detail].compactMap { $0 }.joined(separator: " · "),
                 imageURL: info.posterURL,
-                progress: fraction
+                progress: progress.fraction
             )
         }
         topShelf.publish(TopShelfWatchingSnapshot(baseURL: account.baseURL, username: account.username, items: items))

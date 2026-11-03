@@ -295,4 +295,46 @@ final class GalleryViewModelTests: XCTestCase {
         viewModel.reloadWatchState()
         XCTAssertEqual(viewModel.shelves.playEntries.map(\.path), [movie, episodes[0]])
     }
+
+    func testAShowStaysInWatchingOnItsNextEpisodeUntilEveryEpisodeIsWatched() async throws {
+        let server = FakeLibraryServer()
+        await GalleryFixtures.populate(server)
+        let store = GalleryLibraryStore(baseURL: baseURL, username: "alice", defaults: defaults, directory: directory)
+        store.setRoots(["/Movies", "/TV"])
+        store.database.saveMatches([
+            "show|dark": GalleryMatch(tmdbID: 70_523, title: "Dark", genreIDs: [], date: "2017-12-01", matchedAt: Date())
+        ], language: "none")
+        // Behind the real clock the removal is stamped with, until played again.
+        var clock = Date() - 600
+        let progress = PlaybackProgressStore(defaults: defaults, now: { clock })
+        let identity = { (path: String) in PlaybackProgressIdentity(baseURL: self.baseURL.absoluteString, username: "alice", virtualPath: path) }
+        let episodes = ["/TV/Dark/Season 1/Dark.S01E01.mkv", "/TV/Dark/Season 1/Dark.S01E02.mkv"]
+        progress.update(identity: identity(episodes[0]), position: 600, duration: 3_000)
+
+        let viewModel = makeViewModel(server: server, store: store, progress: progress)
+        viewModel.onAppear()
+        await waitUntil { viewModel.phase == .ready && viewModel.catalog.videoCount == 4 }
+        XCTAssertEqual(viewModel.shelves.playEntries.map(\.path), [episodes[0]])
+
+        // Finishing the first episode moves the card on to the second.
+        clock += 60
+        progress.update(identity: identity(episodes[0]), position: 2_950, duration: 3_000)
+        viewModel.reloadWatchState()
+        XCTAssertEqual(viewModel.shelves.playEntries.map(\.path), [episodes[1]])
+        XCTAssertEqual(viewModel.shelves.playEntries.first?.status, .unwatched)
+
+        // Removing it keeps it off until the show is played again.
+        viewModel.removeFromWatching(try XCTUnwrap(viewModel.shelves.playEntries.first?.title))
+        XCTAssertTrue(viewModel.shelves.playEntries.isEmpty)
+        clock = Date() + 60
+        progress.update(identity: identity(episodes[1]), position: 600, duration: 3_000)
+        viewModel.reloadWatchState()
+        XCTAssertEqual(viewModel.shelves.playEntries.map(\.path), [episodes[1]])
+
+        // Finishing the last episode takes the show off Watching.
+        clock += 60
+        progress.update(identity: identity(episodes[1]), position: 2_950, duration: 3_000)
+        viewModel.reloadWatchState()
+        XCTAssertTrue(viewModel.shelves.playEntries.isEmpty)
+    }
 }

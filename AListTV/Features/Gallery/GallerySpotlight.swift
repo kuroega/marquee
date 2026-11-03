@@ -142,7 +142,7 @@ extension GalleryViewModel {
             guard let show = catalog.show(id) else { return }
             var content = showContent(show)
             let episode = path.flatMap { path in show.episodes.first { $0.path == path } }
-            if watching { content.eyebrow = "CONTINUE WATCHING" }
+            if watching { content.eyebrow = episode.map { status($0.path) == .unwatched } == true ? "UP NEXT" : "CONTINUE WATCHING" }
             if let episode {
                 var parts = [episode.code]
                 if let name = episode.file.parsed.episodeTitle { parts.append(name) }

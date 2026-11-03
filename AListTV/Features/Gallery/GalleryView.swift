@@ -604,7 +604,7 @@ struct PlayCardLabel: View {
         switch entry.status {
         case let .inProgress(_, remaining): GalleryFormat.remaining(remaining)
         case .watched: "Watched · \(GalleryFormat.relative(entry.date))"
-        case .unwatched: "Opened · \(GalleryFormat.relative(entry.date))"
+        case .unwatched: "Up Next"
         }
     }
 }

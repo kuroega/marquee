@@ -361,6 +361,7 @@ struct GalleryLibraryStore {
     static let rootsDefaultsKey = "com.alist.tv.gallery-roots-v1"
     static let excludedDefaultsKey = "com.alist.tv.gallery-excluded-v1"
     static let englishMetadataDefaultsKey = "com.alist.tv.gallery-english-metadata"
+    static let watchingDismissalsDefaultsKey = "com.alist.tv.gallery-watching-dismissed-v1"
 
     let accountKey: String
     let database: GalleryDatabase
@@ -399,6 +400,18 @@ struct GalleryLibraryStore {
         var all = defaults.dictionary(forKey: Self.excludedDefaultsKey) ?? [:]
         all[accountKey] = Array(Set(excluded.map(AListPath.normalize))).sorted()
         defaults.set(all, forKey: Self.excludedDefaultsKey)
+    }
+
+    /// When each show was removed from Watching, by show ID; it stays off
+    /// until one of its episodes is played again.
+    var watchingDismissals: [String: Date] {
+        (defaults.dictionary(forKey: Self.watchingDismissalsDefaultsKey)?[accountKey] as? [String: Date]) ?? [:]
+    }
+
+    func setWatchingDismissals(_ dismissals: [String: Date]) {
+        var all = defaults.dictionary(forKey: Self.watchingDismissalsDefaultsKey) ?? [:]
+        all[accountKey] = dismissals
+        defaults.set(all, forKey: Self.watchingDismissalsDefaultsKey)
     }
 
     /// Matches carry the language they were fetched in, so they live per language.

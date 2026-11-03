@@ -265,6 +265,17 @@ struct GalleryWatchState: Sendable, Equatable {
 
     func isWatched(_ path: String) -> Bool { watched[path] != nil }
 
+    /// The episode to carry on with once a show has been started: the first
+    /// unwatched one after the last watched, else the first unwatched. Nil
+    /// until an episode is watched, and once every one is. Specials count
+    /// only for shows that have nothing else.
+    func upNext(in show: GalleryShow) -> GalleryEpisode? {
+        let regular = show.episodes.filter { $0.season != 0 }
+        let episodes = regular.isEmpty ? show.episodes : regular
+        guard let lastWatched = episodes.lastIndex(where: { isWatched($0.path) }) else { return nil }
+        return episodes[(lastWatched + 1)...].first { !isWatched($0.path) } ?? episodes.first { !isWatched($0.path) }
+    }
+
     /// Most recent interaction of any kind, for "Watching" ordering.
     func lastActivity(_ path: String) -> Date? {
         [progress[path]?.updatedAt, watched[path], opened[path]].compactMap { $0 }.max()
