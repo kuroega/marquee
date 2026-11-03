@@ -1052,7 +1052,7 @@ final class GalleryViewModel: ObservableObject {
                 size: file.size,
                 title: info.title,
                 subtitle: [episode, GalleryFormat.remaining(remaining)].compactMap { $0 }.joined(separator: " · "),
-                imageURL: info.backdropURL,
+                imageURL: info.posterURL,
                 progress: fraction
             )
         }

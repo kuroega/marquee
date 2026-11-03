@@ -11,7 +11,7 @@ final class ContentProvider: TVTopShelfContentProvider {
         let items = snapshot.items.map { entry -> TVTopShelfSectionedItem in
             let item = TVTopShelfSectionedItem(identifier: entry.path)
             item.title = [entry.title, entry.subtitle].compactMap { $0 }.joined(separator: " · ")
-            item.imageShape = .hdtv
+            item.imageShape = .poster
             item.playbackProgress = entry.progress
             item.setImageURL(entry.imageURL, for: [.screenScale1x, .screenScale2x])
             item.playAction = TVTopShelfAction(url: TopShelfLink.play(path: entry.path).url)
