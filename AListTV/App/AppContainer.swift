@@ -30,6 +30,9 @@ final class AppContainer: ObservableObject {
     private let recentItemsStore: RecentItemsStore
     private let tmdbAPIKey: String?
     private let galleryCacheDirectory: URL?
+    private let topShelf: TopShelfWatchingStore?
+    /// A Top Shelf card's request, held until a session is active.
+    private var pendingLink: TopShelfLink?
     private var didAttemptRestore = false
 
     init(arguments: [String] = ProcessInfo.processInfo.arguments) {
@@ -49,6 +52,7 @@ final class AppContainer: ObservableObject {
         let appStorage: UserDefaults
         var tmdbAPIKey = TMDBConfiguration.apiKey()
         var galleryCacheDirectory: URL?
+        var topShelf = TopShelfWatchingStore.shared()
 
 #if DEBUG
         if arguments.contains("ui-testing") {
@@ -70,6 +74,7 @@ final class AppContainer: ObservableObject {
             // UI tests stay offline and never reuse a real library index.
             tmdbAPIKey = nil
             galleryCacheDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("gallery-ui-testing-\(UUID().uuidString)")
+            topShelf = nil
         } else {
             let sessionStore = SessionCredentialStore(backing: KeychainCredentialStore())
             credentialStore = sessionStore
@@ -119,6 +124,7 @@ final class AppContainer: ObservableObject {
         self.appStorage = appStorage
         self.tmdbAPIKey = tmdbAPIKey
         self.galleryCacheDirectory = galleryCacheDirectory
+        self.topShelf = topShelf
         connectionViewModel = ConnectionViewModel(
             preferences: preferences,
             credentialStore: credentialStore,
@@ -160,6 +166,33 @@ final class AppContainer: ObservableObject {
 
     func dismissLogoutError() {
         logoutError = nil
+    }
+
+    /// Handles a Top Shelf card's Play (resume now) or select (show the title).
+    func open(_ url: URL) {
+        guard let link = TopShelfLink(url: url) else { return }
+        pendingLink = link
+        openPendingLink()
+    }
+
+    private func openPendingLink() {
+        guard let link = pendingLink, route == .browser,
+              let player = playerCoordinator, let gallery = galleryViewModel,
+              let connection = connectionViewModel.activeConnection else { return }
+        pendingLink = nil
+        // Cards only ever stand for the signed-in account's files.
+        guard let snapshot = topShelf?.snapshot(),
+              snapshot.baseURL == connection.baseURL.absoluteString, snapshot.username == connection.username,
+              let item = snapshot.items.first(where: { $0.path == link.path }) else { return }
+        switch link {
+        case .play:
+            let object = AListObject(virtualPath: item.path, name: item.name, size: item.size, isDirectory: false, type: AListFileType.video.rawValue)
+            Task { await player.play(object: object, resuming: true) }
+        case .show:
+            player.isPresented = false
+            appStorage.set(HomeMode.gallery.rawValue, forKey: HomeMode.storageKey)
+            gallery.reveal(path: item.path)
+        }
     }
 
 
@@ -204,10 +237,12 @@ final class AppContainer: ObservableObject {
             baseURL: connection.baseURL,
             username: connection.username,
             tmdbAPIKey: tmdbAPIKey,
+            topShelf: topShelf,
             onPlay: { [weak player] object in await player?.play(object: object) },
             onUnauthorized: { [weak self] in self?.handleUnauthorized() }
         )
         route = .browser
+        openPendingLink()
     }
 
     private func handleUnauthorized() {
@@ -222,5 +257,6 @@ final class AppContainer: ObservableObject {
         recentsViewModel = nil
         galleryViewModel = nil
         route = .connection
+        topShelf?.publish(nil)
     }
 }

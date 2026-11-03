@@ -116,6 +116,41 @@ final class GalleryViewModelTests: XCTestCase {
         await waitUntil { viewModel.phase == .ready && viewModel.catalog.videoCount == 5 }
     }
 
+    func testRescanCarriesWatchHistoryToFoldersRenamedOnTheServer() async throws {
+        let server = FakeLibraryServer()
+        await GalleryFixtures.populate(server)
+        let store = GalleryLibraryStore(baseURL: baseURL, username: "alice", defaults: defaults, directory: directory)
+        store.setRoots(["/Movies", "/TV"])
+        let progress = PlaybackProgressStore(defaults: defaults)
+        let identity = { PlaybackProgressIdentity(baseURL: self.baseURL.absoluteString, username: "alice", virtualPath: $0) }
+        progress.update(identity: identity("/TV/Dark/Season 1/Dark.S01E01.mkv"), position: 600, duration: 3_000)
+        progress.setWatched(true, identity: identity("/TV/Dark/Season 1/Dark.S01E02.mkv"))
+        // Same name as the episode above, but its own video was deleted: it
+        // must not take over the episode's history.
+        progress.update(identity: identity("/TV/Old/Dark.S01E01.mkv"), position: 900, duration: 3_000)
+        let viewModel = makeViewModel(server: server, store: store, progress: progress)
+        viewModel.onAppear()
+        await waitUntil { viewModel.phase == .ready && viewModel.lastScan != nil }
+
+        await server.removeFolder("/TV/Dark")
+        await server.removeFolder("/TV/Dark/Season 1")
+        await server.setFolder("/TV", [GalleryFixtures.folder("/TV/Dark (2017)", modified: "2026-03-01T00:00:00Z")])
+        await server.setFolder("/TV/Dark (2017)", [GalleryFixtures.folder("/TV/Dark (2017)/S01")])
+        await server.setFolder("/TV/Dark (2017)/S01", [
+            GalleryFixtures.video("/TV/Dark (2017)/S01/Dark.S01E01.mkv"),
+            GalleryFixtures.video("/TV/Dark (2017)/S01/Dark.S01E02.mkv")
+        ])
+        let previousScan = viewModel.lastScan
+        viewModel.rescanAllFolders()
+        await waitUntil { viewModel.phase == .ready && viewModel.lastScan != previousScan }
+
+        XCTAssertEqual(progress.record(for: identity("/TV/Dark (2017)/S01/Dark.S01E01.mkv"))?.position, 600)
+        XCTAssertNil(progress.record(for: identity("/TV/Dark/Season 1/Dark.S01E01.mkv")))
+        XCTAssertEqual(progress.watchedRecords().map(\.identity.virtualPath), ["/TV/Dark (2017)/S01/Dark.S01E02.mkv"])
+        XCTAssertEqual(progress.record(for: identity("/TV/Old/Dark.S01E01.mkv"))?.position, 900)
+        XCTAssertEqual(viewModel.status("/TV/Dark (2017)/S01/Dark.S01E02.mkv"), .watched)
+    }
+
     func testChangingLibraryFoldersDropsVideosOutsideThemImmediately() async throws {
         let server = FakeLibraryServer()
         await GalleryFixtures.populate(server)

@@ -7,6 +7,8 @@ enum HomeMode: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    static let storageKey = "com.alist.tv.home-mode"
+
     var title: String {
         switch self {
         case .recents: "Recents"
@@ -40,7 +42,7 @@ struct HomeView: View {
     let logoutError: String?
     let dismissLogoutError: () -> Void
 
-    @AppStorage("com.alist.tv.home-mode") private var modeRaw = HomeMode.recents.rawValue
+    @AppStorage(HomeMode.storageKey) private var modeRaw = HomeMode.recents.rawValue
     @FocusState private var focusedMode: HomeMode?
     @FocusState private var isSignOutFocused: Bool
     @State private var previousModeOrder = 0

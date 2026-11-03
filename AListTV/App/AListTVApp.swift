@@ -30,6 +30,7 @@ private struct AppRootView: View {
         .preferredColorScheme(.dark)
         .defaultAppStorage(container.appStorage)
         .task { await container.restoreSession() }
+        .onOpenURL { container.open($0) }
     }
 
     @ViewBuilder

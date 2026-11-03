@@ -120,9 +120,16 @@ final class GalleryViewModel: ObservableObject {
     private let onPlay: @MainActor (AListObject) async -> Void
     private let onUnauthorized: @MainActor () async -> Void
     private let tmdbAPIKey: String?
+    /// Mirrors the Watching shelf onto the Top Shelf; nil when not shown there.
+    private let topShelf: TopShelfWatchingStore?
+    /// A file whose title opens once the library has loaded.
+    private var pendingReveal: String?
 
     /// The indexed videos, mirroring the store, keyed by path.
     private var files: [String: LibraryFile] = [:]
+    /// Videos the current scan dropped, so their watch history can follow
+    /// them to where they turn up (a folder renamed on the server).
+    private var droppedFiles: [String: LibraryFile] = [:]
     private var matches: [String: GalleryMatch] = [:]
     private var scanState = GalleryScanState()
     private var didLoad = false
@@ -163,6 +170,7 @@ final class GalleryViewModel: ObservableObject {
         baseURL: URL,
         username: String,
         tmdbAPIKey: String?,
+        topShelf: TopShelfWatchingStore? = nil,
         onPlay: @escaping @MainActor (AListObject) async -> Void = { _ in },
         onUnauthorized: @escaping @MainActor () async -> Void = {}
     ) {
@@ -172,6 +180,7 @@ final class GalleryViewModel: ObservableObject {
         self.recentItemsStore = recentItemsStore
         account = RecentItemsAccount(baseURL: baseURL.absoluteString, username: username)
         self.tmdbAPIKey = tmdbAPIKey
+        self.topShelf = topShelf
         tmdb = Self.makeClient(apiKey: tmdbAPIKey, englishOnly: store.prefersEnglishMetadata)
         self.onPlay = onPlay
         self.onUnauthorized = onUnauthorized
@@ -267,6 +276,7 @@ final class GalleryViewModel: ObservableObject {
         scanner.excluded = excluded
         scanner.bypassServerCache = bypassServerCache
         libraryIssue = nil
+        droppedFiles = [:]
         phase = .scanning(LibraryScanProgress(foldersScanned: 0, videosFound: 0, currentFolder: roots.first ?? "/"))
         let progress: @Sendable (LibraryScanProgress) async -> Void = { [weak self] progress in
             await self?.scanProgressed(progress, generation: generation)
@@ -317,7 +327,9 @@ final class GalleryViewModel: ObservableObject {
     /// the store keeps them and the next scan re-syncs from it first.
     private func apply(_ change: LibraryChange, generation: Int) {
         guard scanGeneration == generation else { return }
-        for path in change.removed { files[path] = nil }
+        for path in change.removed {
+            if let file = files.removeValue(forKey: path) { droppedFiles[path] = file }
+        }
         for (path, file) in change.upserted { files[path] = file }
         enqueueMatches(for: change.upserted.values)
         scheduleRebuild()
@@ -331,7 +343,9 @@ final class GalleryViewModel: ObservableObject {
             scanState.roots = LibraryScanner.minimalRoots(roots)
             lastScan = now
             forgetRemovedTitles()
+            relinkMovedFiles()
         }
+        droppedFiles = [:]
         if result.foldersFailed > 0 {
             libraryIssue = result.foldersListed == 0
                 ? "Couldn’t reach your library folders."
@@ -638,6 +652,35 @@ final class GalleryViewModel: ObservableObject {
         return outcome
     }
 
+    /// Moves resume points, watched marks and history off videos no longer
+    /// in the library onto the one indexed video with the same name (and the
+    /// same size, when the scan saw the old one go), so renaming folders on
+    /// the server keeps what was watched. A video that already has history
+    /// of its own is never overwritten.
+    private func relinkMovedFiles() {
+        let mine = { (identity: PlaybackProgressIdentity) in
+            identity.baseURL == self.account.baseURL && identity.username == self.account.username
+        }
+        var tracked = Set(progressStore.allRecords().map(\.identity).filter(mine).map(\.virtualPath))
+        tracked.formUnion(progressStore.watchedRecords().map(\.identity).filter(mine).map(\.virtualPath))
+        tracked.formUnion(recentItemsStore.items(for: account).compactMap(\.object.virtualPath))
+        let stale = tracked.filter { files[$0] == nil && belongsInLibrary($0) }
+        guard !stale.isEmpty else { return }
+
+        let byName = Dictionary(grouping: files.values, by: \.name)
+        var moved = false
+        for old in stale.sorted() {
+            let name = String(old.split(separator: "/").last ?? "")
+            guard var candidates = byName[name] else { continue }
+            if let dropped = droppedFiles[old] { candidates = candidates.filter { $0.size == dropped.size } }
+            guard candidates.count == 1, let target = candidates.first, !tracked.contains(target.path) else { continue }
+            movePlaybackState(from: old, to: target.path, name: target.name)
+            tracked.insert(target.path)
+            moved = true
+        }
+        if moved { reloadWatchState() }
+    }
+
     private func movePlaybackState(from old: String, to new: String, name: String) {
         let identity = { PlaybackProgressIdentity(baseURL: self.account.baseURL, username: self.account.username, virtualPath: $0) }
         progressStore.move(from: identity(old), to: identity(new))
@@ -794,6 +837,19 @@ final class GalleryViewModel: ObservableObject {
 
     // MARK: Playback
 
+    /// Opens the title holding `path`, focused on it, once the library is loaded.
+    func reveal(path: String) {
+        pendingReveal = path
+        revealPendingTitle()
+    }
+
+    private func revealPendingTitle() {
+        guard let path = pendingReveal, isLoaded else { return }
+        pendingReveal = nil
+        guard let title = catalog.title(forPath: path) else { return }
+        self.path = [.title(title, focusPath: path)]
+    }
+
     func play(_ file: LibraryFile) {
         let object = file.object
         Task { await onPlay(object) }
@@ -919,6 +975,7 @@ final class GalleryViewModel: ObservableObject {
         self.catalog = catalog
         rebuildShelves()
         refreshSpotlight()
+        revealPendingTitle()
     }
 
     private func rebuildShelves() {
@@ -978,6 +1035,28 @@ final class GalleryViewModel: ObservableObject {
         let unindexedShows = catalog.shows.filter { !$0.isIndexed }.map { (GalleryTitle.show($0.id), $0.addedAt) }
         shelves.unindexed = (unindexedMovies + unindexedShows).sorted { $0.1 > $1.1 }.map(\.0)
         self.shelves = shelves
+        publishTopShelf()
+    }
+
+    /// Hands the Watching shelf to the Top Shelf extension. An unloaded
+    /// library has no shelf yet, so the last one published stays.
+    private func publishTopShelf() {
+        guard let topShelf, isLoaded else { return }
+        let items = shelves.playEntries.prefix(10).compactMap { entry -> TopShelfWatchingItem? in
+            guard let file = files[entry.path], let info = card(for: entry.title),
+                  case let .inProgress(fraction, remaining) = entry.status else { return nil }
+            let episode = catalog.episode(forPath: entry.path)?.episode.code
+            return TopShelfWatchingItem(
+                path: entry.path,
+                name: file.name,
+                size: file.size,
+                title: info.title,
+                subtitle: [episode, GalleryFormat.remaining(remaining)].compactMap { $0 }.joined(separator: " · "),
+                imageURL: info.backdropURL,
+                progress: fraction
+            )
+        }
+        topShelf.publish(TopShelfWatchingSnapshot(baseURL: account.baseURL, username: account.username, items: items))
     }
 
     // MARK: Metadata

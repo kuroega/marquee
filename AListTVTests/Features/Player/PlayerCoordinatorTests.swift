@@ -391,6 +391,24 @@ final class PlayerCoordinatorTests: XCTestCase {
         XCTAssertNil(coordinator.resumePrompt)
     }
 
+    func testResumingPlaysFromSavedPositionWithoutPrompt() async throws {
+        let suite = "PlayerCoordinatorTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        let store = PlaybackProgressStore(defaults: defaults)
+        let identity = PlaybackProgressIdentity(baseURL: "https://alist.example", username: "alice", virtualPath: "/video.mp4")
+        store.update(identity: identity, position: 60, duration: 200)
+        let api = PlayerFakeAPI(details: [detail(url: "https://media.example/video", path: "/video.mp4")])
+        let player = PlayerFakeController()
+        let coordinator = makeCoordinator(api: api, player: player, store: store)
+
+        await coordinator.play(object: object("/video.mp4"), resuming: true)
+
+        XCTAssertNil(coordinator.resumePrompt)
+        XCTAssertEqual(player.seekValues, [60])
+        XCTAssertEqual(player.playCount, 1)
+    }
+
     func testSavedProgressTimesOutToBeginning() async throws {
         let suite = "PlayerCoordinatorTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!

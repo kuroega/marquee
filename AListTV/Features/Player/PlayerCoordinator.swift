@@ -158,11 +158,13 @@ final class PlayerCoordinator: ObservableObject {
         siblingMediaTask?.cancel()
     }
 
-    func play(object: AListObject) async {
-        await play(object: object, isAutomaticTransition: false)
+    /// Plays `object`; with `resuming`, a saved resume point is used right
+    /// away instead of offering it.
+    func play(object: AListObject, resuming: Bool = false) async {
+        await play(object: object, isAutomaticTransition: false, resuming: resuming)
     }
 
-    private func play(object: AListObject, isAutomaticTransition: Bool) async {
+    private func play(object: AListObject, isAutomaticTransition: Bool, resuming: Bool = false) async {
         guard !object.isDirectory, let path = object.virtualPath, !path.isEmpty else {
             state = .failed(message: "Folders cannot be played.")
             return
@@ -207,7 +209,9 @@ final class PlayerCoordinator: ObservableObject {
             state = .playing
             onPlaybackStarted(object)
             startMonitoring(session: activeSession)
-            if let record = resumableProgress {
+            if let record = resumableProgress, resuming {
+                await resume(at: record.position, session: activeSession)
+            } else if let record = resumableProgress {
                 beginResumePrompt(position: record.position, duration: record.duration, session: activeSession)
             } else {
                 await playFromStart(session: activeSession)
@@ -244,11 +248,14 @@ final class PlayerCoordinator: ObservableObject {
         resumeTask = nil
         resumePrompt = nil
         Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.controller.seek(to: prompt.position)
-            guard self.sessionID == activeSession, self.isPresented else { return }
-            self.controller.play()
+            await self?.resume(at: prompt.position, session: activeSession)
         }
+    }
+
+    private func resume(at position: TimeInterval, session: UUID) async {
+        await controller.seek(to: position)
+        guard sessionID == session, isPresented else { return }
+        controller.play()
     }
 
     func startFromBeginning() {
