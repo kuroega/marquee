@@ -3,6 +3,26 @@
 - For any tvos app development, bug fix, or modification on the existing features, etc., please make sure you always verify the code changes in the macOS tvos 27.x simulator. (this rule only applies to the agent working in macOS)
 - If the tvOS App build requires VLCKit, please reuse `~/Developer/SDK/VLCKit-4` first before download a fresh new one. Always double confirm with human if you need to do a fresh download of the VLCKit from internet.
 
+## VLCKit Binary
+
+The project pins VLCKit `4.0.0-a22`, which is an SPM binary target: an 865 MB zip from download.videolan.org. That server is often very slow from here (about 14 KB/s, which means hours), and xcodebuild downloads it again whenever a DerivedData folder's `SourcePackages/artifacts` is empty. `-disableAutomaticPackageResolution` and `-skipPackageUpdates` don't stop that download.
+
+Local copies on the maintainer's Mac:
+
+| Path | What |
+| --- | --- |
+| `~/Developer/SDK/VLCKit-4.0-20260720-1538.zip` | The original zip as published. SHA-256 `d9de86d0c755cbcf46c49513ff57fffcd98258f0c7dd29f3e2d23bff3860da2a`, the same checksum as VLCKit's `Package.swift`. |
+| `~/Developer/SDK/VLCKit-4/VLCKit.xcframework` | The xcframework unpacked from that zip, with tvOS device and simulator slices. |
+
+- Check that these files exist before building. If they're missing, ask the human to download the zip in a browser rather than letting xcodebuild fetch it.
+- To build without the download, override the package locally:
+  1. Outside the repo, make a folder named `VLCKit`.
+  2. Clone the xcframework into it with `cp -cR` and run `xattr -cr` on the copy.
+  3. Add a `Package.swift` that declares `.library(name: "VLCKit", targets: ["VLCKit"])` and `.binaryTarget(name: "VLCKit", path: "VLCKit.xcframework")`.
+  4. Create an `.xcworkspace` that references both that folder and `AListTV.xcodeproj` by absolute path.
+  5. Build with `xcodebuild -workspace <that>.xcworkspace -scheme AListTV …`.
+- If VLCKit is bumped, the zip name and checksum change. Update this table once the new zip is downloaded.
+
 ## Contribution Workflow
 
 - Follow [CONTRIBUTING.md](CONTRIBUTING.md). Never commit or push to `main` directly. Branch from the latest `main` using one of the prefixes `feat/`, `fix/`, `perf/`, `refactor/`, `docs/`, `chore/`, and land changes through a pull request.
