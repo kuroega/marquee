@@ -1,3 +1,4 @@
+import Charts
 import SwiftUI
 import UIKit
 
@@ -193,6 +194,7 @@ private struct ImmersivePlaybackStage<VideoContent: View>: View {
     @State private var coverFlowPanOrigin: Int?
     @State private var coverFlowPanMovedAt: Date?
     @State private var coverFlowIdleTask: Task<Void, Never>?
+    @State private var diagnosticsHistory = PlaybackDiagnosticsHistory()
     @FocusState private var focus: FocusTarget?
 
     private var isTuningSubtitles: Bool { presentedPanel == .subtitles }
@@ -270,7 +272,7 @@ private struct ImmersivePlaybackStage<VideoContent: View>: View {
                 .padding(.trailing, 88)
 
             if let diagnostics {
-                PlaybackDiagnosticsPanel(snapshot: diagnostics, close: { setDiagnosticsEnabled(false) })
+                PlaybackDiagnosticsPanel(snapshot: diagnostics, history: diagnosticsHistory, close: { setDiagnosticsEnabled(false) })
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                     .padding(.top, 150)
                     .padding(.trailing, 88)
@@ -320,7 +322,12 @@ private struct ImmersivePlaybackStage<VideoContent: View>: View {
             if playing { scheduleChromeHideIfNeeded() } else { revealChrome() }
         }
         .onChange(of: isBuffering) { _, buffering in if buffering { revealChrome() } else { scheduleChromeHideIfNeeded() } }
-        .onChange(of: diagnostics) { _, snapshot in
+        .onChange(of: diagnostics, initial: true) { old, snapshot in
+            if let snapshot {
+                if old == nil { diagnosticsHistory = PlaybackDiagnosticsHistory() }
+                diagnosticsHistory.record(snapshot, at: ProcessInfo.processInfo.systemUptime)
+            }
+            guard old != snapshot else { return }
             if snapshot == nil { scheduleChromeHideIfNeeded() } else { hideChromeTask?.cancel() }
         }
         .onChange(of: focus) { _, target in
@@ -1559,10 +1566,11 @@ private struct PlaybackTimeline: View {
 
 private struct PlaybackDiagnosticsPanel: View {
     let snapshot: PlaybackDiagnosticsSnapshot
+    let history: PlaybackDiagnosticsHistory
     let close: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
+        VStack(alignment: .leading, spacing: 18) {
             HStack {
                 Text("Stats for Nerds").font(.system(size: 32, weight: .bold))
                 Spacer()
@@ -1587,6 +1595,7 @@ private struct PlaybackDiagnosticsPanel: View {
                 ("Audio", metadata(snapshot.audioTitle, snapshot.audioLanguageCode, snapshot.audioCodec)),
                 ("Subtitle", metadata(snapshot.subtitleTitle, snapshot.subtitleLanguageCode, snapshot.subtitleCodec))
             ])
+            charts
         }
         .font(.system(size: 22, weight: .medium).monospacedDigit())
         .frame(width: 720, alignment: .leading)
@@ -1596,13 +1605,41 @@ private struct PlaybackDiagnosticsPanel: View {
         .accessibilityIdentifier("player.diagnostics")
     }
 
+    private var charts: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle("Last \(Int(PlaybackDiagnosticsHistory.window))s")
+            HStack(alignment: .top, spacing: 28) {
+                DiagnosticsLineChart(
+                    title: "Bitrate · Mbit/s",
+                    samples: history.samples,
+                    series: [
+                        .init(name: "Input", color: DiagnosticsLineChart.primary) { $0.inputMbps },
+                        .init(name: "Demux", color: DiagnosticsLineChart.secondary) { $0.demuxMbps }
+                    ]
+                )
+                .accessibilityIdentifier("player.diagnostics.bitrate-chart")
+                DiagnosticsLineChart(
+                    title: "Frames · per second",
+                    samples: history.samples,
+                    series: (history.hasRenderedFrames ? [.init(name: "Shown", color: DiagnosticsLineChart.primary) { $0.renderedFPS }] : [])
+                        + [.init(name: "Dropped", color: DiagnosticsLineChart.secondary) { $0.droppedFPS }]
+                )
+                .accessibilityIdentifier("player.diagnostics.frames-chart")
+            }
+        }
+    }
+
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.system(size: 18, weight: .bold))
+            .tracking(1.4)
+            .foregroundStyle(Theme.accent)
+            .padding(.bottom, 2)
+    }
+
     private func group(_ title: String, _ rows: [(String, String)]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title.uppercased())
-                .font(.system(size: 18, weight: .bold))
-                .tracking(1.4)
-                .foregroundStyle(Theme.accent)
-                .padding(.bottom, 2)
+            sectionTitle(title)
             ForEach(rows, id: \.0) { key, value in
                 HStack(alignment: .firstTextBaseline, spacing: 18) {
                     Text(key).foregroundStyle(.white.opacity(0.5)).frame(width: 130, alignment: .leading)
@@ -1617,6 +1654,89 @@ private struct PlaybackDiagnosticsPanel: View {
     private func bitrate(_ value: Double) -> String { PlaybackPresentation.diagnosticBitrate(value) }
     private func frameRate(_ value: Double?) -> String { value.map { String(format: "%.2f fps", $0) } ?? "—" }
     private func metadata(_ title: String?, _ language: String?, _ codec: String?) -> String { PlaybackPresentation.diagnosticMetadata(title, language, codec) }
+}
+
+/// A small rolling line chart for Stats for Nerds. The legend doubles as
+/// the readout: each series shows its latest value next to its swatch.
+private struct DiagnosticsLineChart: View {
+    struct Series {
+        let name: String
+        let color: Color
+        let value: (PlaybackDiagnosticsSample) -> Double?
+    }
+
+    // Checked for colour-blind separation and contrast on the dark glass panel.
+    static let primary = Color(red: 0x4F / 255, green: 0x8A / 255, blue: 0xE6 / 255)
+    static let secondary = Color(red: 0xD4 / 255, green: 0x76 / 255, blue: 0x2A / 255)
+
+    let title: String
+    let samples: [PlaybackDiagnosticsSample]
+    let series: [Series]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.system(size: 18, weight: .semibold)).foregroundStyle(.white.opacity(0.7))
+            HStack(spacing: 18) {
+                ForEach(series, id: \.name) { item in
+                    HStack(spacing: 8) {
+                        Capsule().fill(item.color).frame(width: 18, height: 4)
+                        Text("\(item.name) \(latest(item))")
+                            .font(.system(size: 17, weight: .medium).monospacedDigit())
+                            .foregroundStyle(.white.opacity(0.85))
+                            .lineLimit(1)
+                    }
+                }
+            }
+            Chart {
+                ForEach(series, id: \.name) { item in
+                    ForEach(samples) { sample in
+                        if let value = item.value(sample) {
+                            LineMark(
+                                x: .value("Seconds", sample.elapsed),
+                                y: .value("Value", value),
+                                series: .value("Series", item.name)
+                            )
+                            .foregroundStyle(item.color)
+                            .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                            .interpolationMethod(.monotone)
+                        }
+                    }
+                }
+            }
+            .chartXScale(domain: xDomain)
+            .chartYScale(domain: 0...yMax)
+            .chartXAxis(.hidden)
+            .chartYAxis {
+                AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { _ in
+                    AxisGridLine(stroke: StrokeStyle(lineWidth: 1)).foregroundStyle(.white.opacity(0.12))
+                    AxisValueLabel().font(.system(size: 14).monospacedDigit()).foregroundStyle(.white.opacity(0.5))
+                }
+            }
+            .chartLegend(.hidden)
+            .frame(height: 84)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+        .accessibilityValue(series.map { "\($0.name) \(latest($0))" }.joined(separator: ", "))
+    }
+
+    /// The newest point sits at the right edge; until the window fills, the
+    /// line grows in from the left.
+    private var xDomain: ClosedRange<Double> {
+        let end = max(PlaybackDiagnosticsHistory.window, samples.last?.elapsed ?? 0)
+        return (end - PlaybackDiagnosticsHistory.window)...end
+    }
+
+    private var yMax: Double {
+        let peak = samples.flatMap { sample in series.compactMap { $0.value(sample) } }.max() ?? 0
+        return max(1, peak * 1.15)
+    }
+
+    private func latest(_ item: Series) -> String {
+        guard let value = samples.last.flatMap(item.value) else { return "—" }
+        return value >= 100 ? String(format: "%.0f", value) : String(format: "%.1f", value)
+    }
 }
 
 private struct MenuKeyCommandCapture: UIViewControllerRepresentable {

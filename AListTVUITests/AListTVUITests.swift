@@ -632,6 +632,17 @@ final class AListTVUITests: XCTestCase {
             XCTAssertFalse(diagnosticsTree.localizedCaseInsensitiveContains(sensitiveValue), "Sensitive value leaked: \(sensitiveValue)")
         }
 
+        // The fixture ticks once a second, so the charts gain points.
+        let bitrateChart = panel.descendants(matching: .any)["player.diagnostics.bitrate-chart"]
+        let framesChart = panel.descendants(matching: .any)["player.diagnostics.frames-chart"]
+        XCTAssertTrue(bitrateChart.waitForExistence(timeout: 3), "The bitrate chart should be visible")
+        XCTAssertTrue(framesChart.exists, "The frames chart should be visible")
+        // About 24 fps; timer jitter moves the decimal.
+        let framesValue = NSPredicate(format: "value CONTAINS 'Shown 2'")
+        wait(for: [expectation(for: framesValue, evaluatedWith: framesChart)], timeout: 5)
+        sleep(4)
+        attachScreenshot(named: "diagnostics-charts")
+
         // Toggle off
         remote.press(.select)
         XCTAssertFalse(panel.exists)

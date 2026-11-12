@@ -104,6 +104,7 @@ final class FixturePlayerController: ObservableObject, PlayerControlling {
     var shouldFailExternalSubtitleAdd = false
     private let autoCompletesPlayback: Bool
     private var autoCompleteTask: Task<Void, Never>?
+    private var diagnosticsTask: Task<Void, Never>?
 
     init(autoCompletesPlayback: Bool = false) {
         self.autoCompletesPlayback = autoCompletesPlayback
@@ -140,10 +141,29 @@ final class FixturePlayerController: ObservableObject, PlayerControlling {
     func setSubtitleAppearance(_ appearance: SubtitleAppearance) { subtitleAppearance = appearance }
     func setSubtitleDelay(_ seconds: TimeInterval) {}
     func setDiagnosticsEnabled(_ enabled: Bool) {
-        diagnostics = enabled ? PlaybackDiagnosticsSnapshot(engine: .vlc, currentTime: currentTime, duration: duration, isPlaying: isPlaying, isSeekable: isSeekable, inputBytesRead: 1_024_000, inputBitrate: 125_000, demuxBytesRead: 1_000_000, demuxBitrate: 120_000, demuxCorrupted: 0, demuxDiscontinuity: 0, decodedVideo: 300, decodedAudio: 500, displayedPictures: 298, latePictures: 1, lostPictures: 1, playedAudioBuffers: 500, lostAudioBuffers: 0, videoResolution: "1920×1080", videoFrameRate: 24, videoCodec: "H.264", audioTitle: "English", audioLanguageCode: "en", audioCodec: "AAC", subtitleTitle: "English", subtitleLanguageCode: "en", subtitleCodec: "WebVTT") : nil
+        diagnosticsTask?.cancel()
+        diagnosticsTask = nil
+        guard enabled else { diagnostics = nil; return }
+        diagnostics = fixtureDiagnostics(tick: 0)
+        // Tick like VLC does (once a second) so the charts have a moving line.
+        diagnosticsTask = Task { @MainActor [weak self] in
+            var tick = 0
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled, let self else { return }
+                tick += 1
+                self.diagnostics = self.fixtureDiagnostics(tick: tick)
+            }
+        }
+    }
+    private func fixtureDiagnostics(tick: Int) -> PlaybackDiagnosticsSnapshot {
+        let wave = sin(Double(tick) / 3)
+        let dropped = Int64(tick / 7)
+        return PlaybackDiagnosticsSnapshot(engine: .vlc, currentTime: currentTime, duration: duration, isPlaying: isPlaying, isSeekable: isSeekable, inputBytesRead: 1_024_000 + Int64(tick) * 1_000_000, inputBitrate: 1_000_000 + 400_000 * wave, demuxBytesRead: 1_000_000 + Int64(tick) * 900_000, demuxBitrate: 900_000 + 250_000 * wave, demuxCorrupted: 0, demuxDiscontinuity: 0, decodedVideo: 300 + Int64(tick) * 24, decodedAudio: 500, displayedPictures: 298 + Int64(tick) * 24 - dropped, latePictures: 1 + dropped, lostPictures: 1, playedAudioBuffers: 500, lostAudioBuffers: 0, videoResolution: "1920×1080", videoFrameRate: 24, videoCodec: "H.264", audioTitle: "English", audioLanguageCode: "en", audioCodec: "AAC", subtitleTitle: "English", subtitleLanguageCode: "en", subtitleCodec: "WebVTT")
     }
     deinit {
         autoCompleteTask?.cancel()
+        diagnosticsTask?.cancel()
         continuation.finish()
     }
 }

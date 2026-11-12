@@ -128,4 +128,41 @@ final class PlayerControllerModelTests: XCTestCase {
         XCTAssertEqual(PlaybackPresentation.diagnosticMetadata("English", nil, "AAC"), "English · AAC")
         XCTAssertEqual(PlaybackPresentation.diagnosticMetadata(nil, "en", nil), "en")
     }
+
+    func testDiagnosticsHistoryDerivesRatesFromCounters() {
+        var history = PlaybackDiagnosticsHistory()
+        history.record(diagnosticsSnapshot(input: 125_000, shown: 100, late: 0), at: 10)
+        history.record(diagnosticsSnapshot(input: 250_000, shown: 124, late: 2), at: 11)
+
+        XCTAssertEqual(history.samples.count, 2)
+        XCTAssertNil(history.samples[0].renderedFPS, "The first sample has nothing to diff against")
+        XCTAssertEqual(history.samples[1].elapsed, 1)
+        XCTAssertEqual(history.samples[1].inputMbps, 2, accuracy: 0.000_1)
+        XCTAssertEqual(history.samples[1].renderedFPS ?? -1, 24, accuracy: 0.000_1)
+        XCTAssertEqual(history.samples[1].droppedFPS, 2, accuracy: 0.000_1)
+    }
+
+    func testDiagnosticsHistoryThrottlesAndTrimsToWindow() {
+        var history = PlaybackDiagnosticsHistory()
+        history.record(diagnosticsSnapshot(input: 0, shown: 0, late: 0), at: 0)
+        history.record(diagnosticsSnapshot(input: 0, shown: 0, late: 0), at: 0.2)
+        XCTAssertEqual(history.samples.count, 1, "Snapshots closer than a second apart are skipped")
+
+        for second in 1...90 { history.record(diagnosticsSnapshot(input: 0, shown: 0, late: 0), at: Double(second)) }
+        XCTAssertEqual(history.samples.first?.elapsed, 30)
+        XCTAssertEqual(history.samples.last?.elapsed, 90)
+    }
+
+    func testDiagnosticsHistoryIgnoresCounterResets() {
+        var history = PlaybackDiagnosticsHistory()
+        history.record(diagnosticsSnapshot(input: 0, shown: 500, late: 9), at: 0)
+        history.record(diagnosticsSnapshot(input: 0, shown: 10, late: 0), at: 1)
+        XCTAssertNil(history.samples[1].renderedFPS)
+        XCTAssertEqual(history.samples[1].droppedFPS, 0)
+        XCTAssertFalse(history.hasRenderedFrames)
+    }
+
+    private func diagnosticsSnapshot(input: Double, shown: Int64, late: Int64) -> PlaybackDiagnosticsSnapshot {
+        PlaybackDiagnosticsSnapshot(engine: .vlc, currentTime: 0, duration: 0, isPlaying: true, isSeekable: true, inputBytesRead: 0, inputBitrate: input, demuxBytesRead: 0, demuxBitrate: input, demuxCorrupted: 0, demuxDiscontinuity: 0, decodedVideo: shown, decodedAudio: 0, displayedPictures: shown, latePictures: late, lostPictures: 0, playedAudioBuffers: 0, lostAudioBuffers: 0, videoResolution: nil, videoFrameRate: nil, videoCodec: nil, audioTitle: nil, audioLanguageCode: nil, audioCodec: nil, subtitleTitle: nil, subtitleLanguageCode: nil, subtitleCodec: nil)
+    }
 }

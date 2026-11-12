@@ -97,6 +97,72 @@ struct PlaybackDiagnosticsSnapshot: Equatable, Sendable {
     let subtitleCodec: String?
 }
 
+/// One point on the Stats for Nerds charts. Rates come from the cumulative
+/// counters of two consecutive snapshots.
+struct PlaybackDiagnosticsSample: Equatable, Sendable, Identifiable {
+    let id: Int
+    /// Seconds since the first sample.
+    let elapsed: TimeInterval
+    let inputMbps: Double
+    let demuxMbps: Double
+    /// Pictures shown per second; nil when the player has no such counter
+    /// (AVPlayer) or for the first sample.
+    let renderedFPS: Double?
+    /// Late plus lost pictures per second.
+    let droppedFPS: Double
+}
+
+/// A rolling window of samples for the Stats for Nerds charts.
+struct PlaybackDiagnosticsHistory: Equatable, Sendable {
+    static let window: TimeInterval = 60
+    /// AVPlayer refreshes its snapshot on every time-observer tick; one point
+    /// a second keeps the lines readable.
+    static let minimumInterval: TimeInterval = 0.9
+
+    private struct Reading: Equatable, Sendable {
+        let uptime: TimeInterval
+        let snapshot: PlaybackDiagnosticsSnapshot
+    }
+
+    private(set) var samples: [PlaybackDiagnosticsSample] = []
+    private var origin: TimeInterval?
+    private var previous: Reading?
+    private var nextID = 0
+
+    var hasRenderedFrames: Bool { samples.contains { $0.renderedFPS != nil } }
+
+    mutating func record(_ snapshot: PlaybackDiagnosticsSnapshot, at uptime: TimeInterval) {
+        if let previous, uptime - previous.uptime < Self.minimumInterval { return }
+        let origin = self.origin ?? uptime
+        self.origin = origin
+
+        var renderedFPS: Double?
+        var droppedFPS = 0.0
+        if let previous {
+            let seconds = uptime - previous.uptime
+            let old = previous.snapshot
+            // A new media restarts VLC's counters; a negative delta is no data.
+            let shown = snapshot.displayedPictures - old.displayedPictures
+            if snapshot.displayedPictures > 0, shown >= 0 { renderedFPS = Double(shown) / seconds }
+            let dropped = (snapshot.latePictures + snapshot.lostPictures) - (old.latePictures + old.lostPictures)
+            droppedFPS = Double(max(0, dropped)) / seconds
+        }
+
+        samples.append(PlaybackDiagnosticsSample(
+            id: nextID,
+            elapsed: uptime - origin,
+            inputMbps: max(0, snapshot.inputBitrate) * 8 / 1_000_000,
+            demuxMbps: max(0, snapshot.demuxBitrate) * 8 / 1_000_000,
+            renderedFPS: renderedFPS,
+            droppedFPS: droppedFPS
+        ))
+        nextID += 1
+        previous = Reading(uptime: uptime, snapshot: snapshot)
+        let cutoff = uptime - origin - Self.window
+        samples.removeAll { $0.elapsed < cutoff }
+    }
+}
+
 enum PlaybackPresentation {
     /// VLC's default Matroska demuxer treats Cues as untrusted and, over HTTP
     /// (not fast-seekable), cannot verify them, so a seek resumes from the last
