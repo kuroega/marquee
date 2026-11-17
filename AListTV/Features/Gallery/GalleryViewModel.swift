@@ -813,10 +813,18 @@ final class GalleryViewModel: ObservableObject {
     }
 
     func setWatched(_ watched: Bool, paths: [String]) {
-        for path in paths {
-            progressStore.setWatched(watched, identity: PlaybackProgressIdentity(baseURL: account.baseURL, username: account.username, virtualPath: path))
-        }
+        let identities = paths.map { PlaybackProgressIdentity(baseURL: account.baseURL, username: account.username, virtualPath: $0) }
+        progressStore.setWatched(watched, identities: identities)
         reloadWatchState()
+    }
+
+    /// The episodes "Mark This and Earlier as Watched" would change: the
+    /// unwatched ones from the start of the run through `episode`. Empty when
+    /// nothing before it is unwatched, since the plain mark already covers
+    /// the episode on its own.
+    func unwatchedEpisodes(through episode: GalleryEpisode, in show: GalleryShow) -> [GalleryEpisode] {
+        let pending = show.episodes(through: episode).filter { !watch.isWatched($0.path) }
+        return pending.contains(where: { ($0.season, $0.episode) != (episode.season, episode.episode) }) ? pending : []
     }
 
     func status(_ path: String) -> WatchStatus { watch.status(path) }

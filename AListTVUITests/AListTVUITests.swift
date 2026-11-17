@@ -162,6 +162,69 @@ final class AListTVUITests: XCTestCase {
         attachScreenshot(named: "gallery-settings-excluded")
     }
 
+    func testMarkThisAndEarlierAsWatchedAsksFirst() {
+        login(username: "alice", openBrowse: false)
+        XCTAssertTrue(app.staticTexts["Un-indexed"].waitForExistence(timeout: 5))
+        let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'gallery.title.' AND hasFocus == true")).firstMatch
+        for _ in 0..<6 where !card.exists {
+            remote.press(.down)
+            Thread.sleep(forTimeInterval: 0.3)
+        }
+        focusSpatially(app.buttons["gallery.title.Shows"])
+        remote.press(.select)
+
+        // Episodes load lazily, so use one that is on screen from the start.
+        let episode = app.buttons["gallery.detail.episode.1.4"]
+        XCTAssertTrue(episode.waitForExistence(timeout: 5))
+        focusSpatially(episode)
+        let isWatched = { (number: Int) in
+            (self.app.buttons["gallery.detail.episode.1.\(number)"].value as? String)?.contains("Watched") == true
+        }
+        XCTAssertFalse(isWatched(1))
+
+        // Menu order: Mark as Watched, Mark This and Earlier as Watched, Show in Browse.
+        let openMarkEarlier = {
+            self.remote.press(.select, forDuration: 1.5)
+            XCTAssertTrue(self.menuItem("Mark This and Earlier as Watched").waitForExistence(timeout: 3))
+            self.remote.press(.down)
+            Thread.sleep(forTimeInterval: 0.3)
+            self.remote.press(.select)
+        }
+        openMarkEarlier()
+        XCTAssertTrue(app.sheets["Mark 4 Episodes as Watched?"].waitForExistence(timeout: 3), app.debugDescription)
+        attachScreenshot(named: "gallery-mark-earlier-confirm")
+
+        // Backing out changes nothing.
+        remote.press(.menu)
+        Thread.sleep(forTimeInterval: 2)
+        attachScreenshot(named: "gallery-mark-earlier-cancelled")
+        XCTAssertTrue(episode.hasFocus, "Focus should return to the episode")
+        XCTAssertFalse(app.sheets["Mark 4 Episodes as Watched?"].exists)
+        XCTAssertTrue(episode.exists)
+        XCTAssertFalse((1...4).contains(where: isWatched))
+
+        openMarkEarlier()
+        XCTAssertTrue(app.sheets["Mark 4 Episodes as Watched?"].waitForExistence(timeout: 3))
+        let confirm = app.buttons.matching(NSPredicate(format: "label == %@ AND hasFocus == true", "Mark as Watched")).firstMatch
+        for _ in 0..<3 where !confirm.exists {
+            remote.press(.up)
+            Thread.sleep(forTimeInterval: 0.3)
+        }
+        XCTAssertTrue(confirm.exists)
+        remote.press(.select)
+
+        let watched = NSPredicate { _, _ in (1...4).allSatisfy(isWatched) }
+        wait(for: [expectation(for: watched, evaluatedWith: nil)], timeout: 3)
+        XCTAssertFalse(isWatched(5))
+        attachScreenshot(named: "gallery-mark-earlier-done")
+
+        // Nothing earlier is left, so the menu no longer offers it.
+        remote.press(.select, forDuration: 1.5)
+        XCTAssertTrue(menuItem("Mark as Unwatched").waitForExistence(timeout: 3))
+        XCTAssertFalse(menuItem("Mark This and Earlier as Watched").exists)
+        remote.press(.menu)
+    }
+
     /// tvOS exposes context menu actions as plain elements, not buttons.
     private func menuItem(_ label: String) -> XCUIElement {
         app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch

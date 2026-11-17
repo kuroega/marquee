@@ -100,6 +100,17 @@ struct GalleryShow: Identifiable, Hashable, Sendable {
     }
 
     var paths: [String] { episodes.map(\.path) }
+
+    /// The episode and every one before it, in watching order. Specials
+    /// (season 0) are a run of their own: a special takes only the specials
+    /// before it, and a regular episode never takes specials.
+    func episodes(through target: GalleryEpisode) -> [GalleryEpisode] {
+        episodes.filter { episode in
+            if target.season == 0 { return episode.season == 0 && episode.episode <= target.episode }
+            return episode.season != 0 && (episode.season, episode.episode) <= (target.season, target.episode)
+        }
+    }
+
     /// Exactly matched on TMDB; otherwise the show is un-indexed.
     var isIndexed: Bool { tmdbID != nil }
 }

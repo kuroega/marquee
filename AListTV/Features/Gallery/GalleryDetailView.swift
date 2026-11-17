@@ -14,7 +14,15 @@ struct GalleryDetailView: View {
     @State private var selectedSeason: Int?
     @State private var seasonInfo: [Int: [Int: TMDBSeasonDetail.Episode]] = [:]
     @State private var isVersionPickerPresented = false
+    @State private var markEarlierRequest: MarkEarlierRequest?
     @FocusState private var focus: Focus?
+
+    /// A pending "Mark This and Earlier as Watched", held until confirmed.
+    private struct MarkEarlierRequest {
+        let showTitle: String
+        let target: GalleryEpisode
+        let episodes: [GalleryEpisode]
+    }
 
     private enum Focus: Hashable {
         case play
@@ -405,6 +413,15 @@ struct GalleryDetailView: View {
                             Button { viewModel.setWatched(!watched, paths: [episode.path]) } label: {
                                 Label(watched ? "Mark as Unwatched" : "Mark as Watched", systemImage: watched ? "circle" : "checkmark.circle")
                             }
+                            let earlier = viewModel.unwatchedEpisodes(through: episode, in: show)
+                            if !earlier.isEmpty {
+                                Button {
+                                    markEarlierRequest = MarkEarlierRequest(showTitle: show.title, target: episode, episodes: earlier)
+                                } label: {
+                                    Label("Mark This and Earlier as Watched", systemImage: "checklist.checked")
+                                }
+                                .accessibilityIdentifier("gallery.detail.episode.mark-earlier")
+                            }
                             Button { onReveal(episode.file.object) } label: { Label("Show in Browse", systemImage: "folder") }
                         }
                         .id(episode.path)
@@ -424,6 +441,45 @@ struct GalleryDetailView: View {
                 }
             }
         }
+        .confirmationDialog(
+            markEarlierTitle,
+            isPresented: Binding(get: { markEarlierRequest != nil }, set: { if !$0 { dismissMarkEarlier() } }),
+            titleVisibility: .visible,
+            presenting: markEarlierRequest
+        ) { request in
+            Button("Mark as Watched") {
+                viewModel.setWatched(true, paths: request.episodes.map(\.path))
+            }
+            .accessibilityIdentifier("gallery.detail.mark-earlier.confirm")
+            Button("Cancel", role: .cancel) {}
+        } message: { request in
+            Text(markEarlierMessage(request))
+        }
+    }
+
+    /// Closing the dialog would hand focus to Play at the top of the page,
+    /// so it goes back to the episode the menu was opened on.
+    private func dismissMarkEarlier() {
+        guard let path = markEarlierRequest?.target.path else { return }
+        markEarlierRequest = nil
+        DispatchQueue.main.async { focus = .episode(path) }
+    }
+
+    private var markEarlierTitle: String {
+        let count = markEarlierRequest?.episodes.count ?? 0
+        return "Mark \(count) Episode\(count == 1 ? "" : "s") as Watched?"
+    }
+
+    private func markEarlierMessage(_ request: MarkEarlierRequest) -> String {
+        let first = request.episodes.first ?? request.target
+        let range = first.path == request.target.path
+            ? episodeLabel(first)
+            : "\(episodeLabel(first)) through \(episodeLabel(request.target))"
+        return "Unwatched episodes of \(request.showTitle) from \(range) will be marked as watched, and their resume points cleared. Episodes can still be unmarked one at a time."
+    }
+
+    private func episodeLabel(_ episode: GalleryEpisode) -> String {
+        episode.season == 0 ? "Special \(episode.episode)" : "S\(episode.season) E\(episode.episode)"
     }
 
     @ViewBuilder

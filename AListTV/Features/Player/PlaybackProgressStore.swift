@@ -88,12 +88,25 @@ struct PlaybackProgressStore {
     /// Marking a file watched also drops its resume point, matching what
     /// finishing playback does; unmarking leaves any resume point alone.
     func setWatched(_ watched: Bool, identity: PlaybackProgressIdentity) {
+        setWatched(watched, identities: [identity])
+    }
+
+    /// Marks or unmarks many files with one read and write of each list, so
+    /// marking a whole run of episodes stays cheap.
+    func setWatched(_ watched: Bool, identities: [PlaybackProgressIdentity]) {
+        var seen = Set<PlaybackProgressIdentity>()
+        let targets = identities.filter { seen.insert($0).inserted }
+        guard !targets.isEmpty else { return }
         var all = watchedRecords()
-        all.removeAll { $0.identity == identity }
+        all.removeAll { seen.contains($0.identity) }
         if watched {
-            all.insert(WatchedRecord(identity: identity, watchedAt: now()), at: 0)
+            let stamp = now()
+            all.insert(contentsOf: targets.map { WatchedRecord(identity: $0, watchedAt: stamp) }, at: 0)
             if all.count > Self.watchedLimit { all.removeSubrange(Self.watchedLimit...) }
-            remove(identity: identity)
+            var progress = records()
+            let before = progress.count
+            progress.removeAll { seen.contains($0.identity) }
+            if progress.count != before { save(progress) }
         }
         guard let data = try? encoder.encode(all) else { return }
         defaults.set(data, forKey: Self.watchedDefaultsKey)
