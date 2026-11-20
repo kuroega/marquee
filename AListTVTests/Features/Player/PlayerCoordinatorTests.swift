@@ -921,6 +921,46 @@ final class PlayerCoordinatorTests: XCTestCase {
         XCTAssertEqual(store.watchedRecords().map(\.identity), [episode1])
     }
 
+    func testSeasonFinaleKeepsItsEndingThenMovesOn() async throws {
+        let api = PlayerFakeAPI(
+            details: [
+                detail(url: "https://media.example/s01e02", path: "/Show/Show.S01E02.mkv"),
+                detail(url: "https://media.example/s02e01", path: "/Show/Show.S02E01.mkv")
+            ],
+            repeatingListByPath: ["/Show": [[
+                object("/Show/Show.S01E01.mkv", type: AListFileType.video.rawValue),
+                object("/Show/Show.S01E02.mkv", type: AListFileType.video.rawValue),
+                object("/Show/Show.S02E01.mkv", type: AListFileType.video.rawValue)
+            ]]]
+        )
+        let player = PlayerFakeController()
+        player.duration = 1_000
+        let coordinator = makeCoordinator(api: api, player: player)
+
+        await coordinator.play(object: object("/Show/Show.S01E02.mkv", type: AListFileType.video.rawValue))
+        coordinator.setSkipEnding(150)
+        player.currentTime = 849
+        try await Task.sleep(for: .milliseconds(50))
+        player.currentTime = 851
+        try await Task.sleep(for: .milliseconds(120))
+        XCTAssertEqual(player.replacedURLs.count, 1, "the finale's ending plays")
+        XCTAssertEqual(coordinator.nowPlayingPath, "/Show/Show.S01E02.mkv")
+
+        player.emit(.ended)
+        try await waitUntil { player.replacedURLs.count == 2 }
+        XCTAssertEqual(coordinator.nowPlayingPath, "/Show/Show.S02E01.mkv")
+    }
+
+    func testOnlyALaterEpisodeOfTheSameSeasonContinuesIt() {
+        func continues(_ current: String, _ next: String) -> Bool {
+            PlayerCoordinator.continuesSeason(from: object(current), to: object(next))
+        }
+        XCTAssertTrue(continues("/Show/Show.S01E01.mkv", "/Show/Show.S01E02.mkv"))
+        XCTAssertFalse(continues("/Show/Show.S01E12.mkv", "/Show/Show.S02E01.mkv"), "next season")
+        XCTAssertFalse(continues("/Show/Season 1/Show - 12.mkv", "/Show/Season 1/NCED.mkv"), "an extra after the finale")
+        XCTAssertTrue(continues("/Videos/Holiday.mp4", "/Videos/Wedding.mp4"), "unnumbered videos keep skipping")
+    }
+
     func testStepsAddUpFromTheCurrentValue() async {
         let api = PlayerFakeAPI(details: [detail(url: "https://media.example/episode-1", path: "/Show/Episode 1.mp4")])
         let coordinator = makeCoordinator(api: api, player: PlayerFakeController())
