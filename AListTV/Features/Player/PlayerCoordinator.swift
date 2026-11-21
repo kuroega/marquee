@@ -102,6 +102,11 @@ final class PlayerCoordinator: ObservableObject {
     private var hasReachedEnding = false
     /// Set when the ending was skipped, so the video is saved as finished.
     private var hasSkippedEnding = false
+    private let nowPlaying: NowPlayingCenter
+    private var nowPlayingTask: Task<Void, Never>?
+    /// Title and artwork for the system Now Playing card, from the Gallery's
+    /// TMDB match; nil falls back to the file and folder names.
+    var nowPlayingMetadataProvider: @MainActor (AListObject) -> NowPlayingMetadata? = { _ in nil }
 
     init(
         api: any AListAPI,
@@ -117,8 +122,10 @@ final class PlayerCoordinator: ObservableObject {
         onPlaybackStarted: @escaping @MainActor (AListObject) -> Void = { _ in },
         subtitleDataLoader: @escaping @Sendable (URL) async throws -> Data = PlayerCoordinator.loadSubtitleData,
         resumeCountdownInterval: Duration = .seconds(1),
-        skipCheckInterval: Duration = .milliseconds(500)
+        skipCheckInterval: Duration = .milliseconds(500),
+        nowPlaying: NowPlayingCenter? = nil
     ) {
+        self.nowPlaying = nowPlaying ?? NowPlayingCenter()
         self.api = api
         self.controller = controller
         standardController = controller
@@ -149,6 +156,7 @@ final class PlayerCoordinator: ObservableObject {
         eventTasks.values.forEach { $0.cancel() }
         progressTask?.cancel()
         skipTask?.cancel()
+        nowPlayingTask?.cancel()
         skipFeedbackTask?.cancel()
         resumeTask?.cancel()
         autoPlayTask?.cancel()
@@ -208,6 +216,7 @@ final class PlayerCoordinator: ObservableObject {
             isPresented = true
             state = .playing
             onPlaybackStarted(object)
+            nowPlaying.begin(nowPlayingMetadataProvider(object) ?? .fallback(name: object.name, path: path), handler: self)
             startMonitoring(session: activeSession)
             if let record = resumableProgress, resuming {
                 await resume(at: record.position, session: activeSession)
@@ -306,6 +315,7 @@ final class PlayerCoordinator: ObservableObject {
         subtitleSelectionTask = nil
         controller.setDiagnosticsEnabled(false)
         controller.pause()
+        nowPlaying.end()
         isPresented = false
         state = .idle
         currentObject = nil
@@ -721,6 +731,18 @@ final class PlayerCoordinator: ObservableObject {
                 self.checkEnding(session: session)
             }
         }
+        nowPlayingTask?.cancel()
+        nowPlayingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.sessionID == session else { return }
+                self.publishNowPlayingTiming()
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+        }
+    }
+
+    private func publishNowPlayingTiming(force: Bool = false) {
+        nowPlaying.update(NowPlayingTiming(elapsed: controller.currentTime, duration: controller.duration, isPlaying: controller.isPlaying), force: force)
     }
 
     private func beginAutoPlay(session: UUID, skippingEnding: Bool = false) {
@@ -867,6 +889,8 @@ final class PlayerCoordinator: ObservableObject {
         progressTask = nil
         skipTask?.cancel()
         skipTask = nil
+        nowPlayingTask?.cancel()
+        nowPlayingTask = nil
     }
 
     private var progressIdentity: PlaybackProgressIdentity? {
@@ -920,5 +944,44 @@ final class PlayerCoordinator: ObservableObject {
 
     private static func message(for error: Error) -> String {
         (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    }
+}
+
+// MARK: Now Playing remote commands
+
+extension PlayerCoordinator: NowPlayingCommandHandling {
+    private var acceptsRemoteCommands: Bool { isPresented && state == .playing }
+
+    func nowPlayingPlay() {
+        guard acceptsRemoteCommands else { return }
+        if resumePrompt != nil {
+            resumeFromSavedPosition()
+        } else {
+            controller.play()
+        }
+    }
+
+    func nowPlayingPause() {
+        guard acceptsRemoteCommands else { return }
+        controller.pause()
+    }
+
+    func nowPlayingTogglePlayPause() {
+        controller.isPlaying ? nowPlayingPause() : nowPlayingPlay()
+    }
+
+    func nowPlayingSkip(by seconds: TimeInterval) {
+        nowPlayingSeek(to: controller.currentTime + seconds)
+    }
+
+    func nowPlayingSeek(to seconds: TimeInterval) {
+        guard acceptsRemoteCommands, resumePrompt == nil else { return }
+        let session = sessionID
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.controller.seek(to: seconds)
+            guard self.sessionID == session else { return }
+            self.publishNowPlayingTiming(force: true)
+        }
     }
 }
