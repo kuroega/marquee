@@ -241,6 +241,9 @@ final class AppContainer: ObservableObject {
             onPlay: { [weak player] object in await player?.play(object: object) },
             onUnauthorized: { [weak self] in self?.handleUnauthorized() }
         )
+        player.nowPlayingMetadataProvider = { [weak self] object in
+            object.virtualPath.flatMap { self?.galleryViewModel?.nowPlayingMetadata(forPath: $0) }
+        }
         route = .browser
         openPendingLink()
     }

@@ -103,6 +103,18 @@ extension GalleryViewModel {
         }
     }
 
+    /// The Now Playing card for a library file: the TMDB title with the
+    /// episode code (or year) and backdrop; nil for files outside the library.
+    func nowPlayingMetadata(forPath path: String) -> NowPlayingMetadata? {
+        let path = catalog.title(forPath: path) == nil ? AListPath.normalize(path) : path
+        guard let title = catalog.title(forPath: path), let info = card(for: title) else { return nil }
+        let subtitle: String? = switch title {
+        case .movie: info.subtitle
+        case .show: catalog.episode(forPath: path)?.episode.code
+        }
+        return NowPlayingMetadata(title: info.title, subtitle: subtitle, artworkURLs: [info.backdropURL, info.posterURL].compactMap { $0 })
+    }
+
     func paths(for title: GalleryTitle) -> [String] {
         switch title {
         case let .movie(id): catalog.movie(id)?.paths ?? []
