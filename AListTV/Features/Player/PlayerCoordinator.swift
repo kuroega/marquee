@@ -557,7 +557,8 @@ final class PlayerCoordinator: ObservableObject {
 
     /// Moves on to the next video once playback runs into the ending. Only a
     /// crossing during playback counts: seeking into the ending (to rewatch
-    /// it) plays it, and so does the last video in the folder.
+    /// it) plays it, and so does the last video in the folder or the last
+    /// episode of a season.
     private func checkEnding(session: UUID) {
         guard sessionID == session, isPresented, state == .playing, resumePrompt == nil,
               isAutoPlayEnabled, !hasReachedEnding, autoPlayTask == nil, controller.isPlaying else {
@@ -765,6 +766,8 @@ final class PlayerCoordinator: ObservableObject {
                   isAutoPlayEnabled,
                   sessionID == session,
                   isPresented else { return }
+            // A season's finale keeps its ending; autoplay still moves on when it ends.
+            if skippingEnding, !Self.continuesSeason(from: currentObject, to: next) { return }
             hasSkippedEnding = skippingEnding
             await play(object: next, isAutomaticTransition: true)
         } catch AListAPIError.unauthorized {
@@ -781,6 +784,17 @@ final class PlayerCoordinator: ObservableObject {
         guard let currentIndex = media.firstIndex(where: { $0.virtualPath == AListPath.normalize(currentPath) }) else { return nil }
         let nextIndex = media.index(after: currentIndex)
         return nextIndex < media.endIndex ? media[nextIndex] : nil
+    }
+
+    /// Whether `next` is a later episode of the season `current` belongs to.
+    /// A video whose name carries no episode number counts as continuing, so
+    /// folders of unnumbered videos still skip their endings.
+    static func continuesSeason(from current: AListObject, to next: AListObject) -> Bool {
+        let now = MediaNameParser.parse(path: current.virtualPath ?? current.name)
+        guard now.kind == .episode, let season = now.season, let episode = now.episode else { return true }
+        let following = MediaNameParser.parse(path: next.virtualPath ?? next.name)
+        guard following.kind == .episode, following.season == season, let nextEpisode = following.episode else { return false }
+        return nextEpisode > episode
     }
 
     private func playableMedia(in parent: String) async throws -> [AListObject] {
